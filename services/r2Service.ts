@@ -1,5 +1,5 @@
 
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 // R2 Configuration from user input
 const R2_ENDPOINT = "https://dd0afffd8fff1c8846db83bc10e2aa1f.r2.cloudflarestorage.com";
@@ -20,8 +20,6 @@ const s3Client = new S3Client({
 
 /**
  * Automatically uploads the processed article to Cloudflare R2
- * @param content The processed article text (markdown)
- * @param userId The user's Supabase ID for path isolation
  */
 export async function uploadToR2(content: string, userId: string): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -40,6 +38,62 @@ export async function uploadToR2(content: string, userId: string): Promise<strin
     return fileName;
   } catch (error) {
     console.error("Failed to save article to Cloudflare R2:", error);
+    throw error;
+  }
+}
+
+/**
+ * Lists all articles for a specific user from R2
+ */
+export async function listArticles(userId: string) {
+  const prefix = `articles/${userId}/`;
+  const command = new ListObjectsV2Command({
+    Bucket: BUCKET_NAME,
+    Prefix: prefix,
+  });
+
+  try {
+    const response = await s3Client.send(command);
+    return response.Contents || [];
+  } catch (error) {
+    console.error("Failed to list articles from R2:", error);
+    throw error;
+  }
+}
+
+/**
+ * Gets the content of a specific article from R2
+ */
+export async function getArticleContent(key: string): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+  });
+
+  try {
+    const response = await s3Client.send(command);
+    const body = await response.Body?.transformToString();
+    return body || "";
+  } catch (error) {
+    console.error("Failed to fetch article content from R2:", error);
+    throw error;
+  }
+}
+
+/**
+ * Deletes an article from R2
+ */
+export async function deleteArticle(key: string) {
+  const command = new DeleteObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+  });
+
+  try {
+    await s3Client.send(command);
+    console.log(`Article deleted: ${key}`);
+  } catch (error) {
+    console.error("Failed to delete article from R2:", error);
     throw error;
   }
 }
