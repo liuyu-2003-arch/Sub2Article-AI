@@ -307,12 +307,11 @@ const App: React.FC = () => {
             )}
             {user ? (
               <div className="flex items-center gap-3">
-                <div className="hidden md:flex flex-col items-end">
-                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                    {isAdmin && <Crown className="w-3 h-3 text-amber-500 fill-amber-500" />}
+                <div className="hidden md:flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    {isAdmin && <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />}
                     {user.email?.split('@')[0]}
                   </span>
-                  <span className="text-[10px] text-slate-400">已登录</span>
                 </div>
                 <button 
                   onClick={logout}
