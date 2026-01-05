@@ -33,6 +33,10 @@
             animation: float 3s ease-in-out infinite;
         }
     </style>
+    <!-- 注入 process shim 兼容浏览器环境 -->
+    <script>
+      window.process = window.process || { env: {} };
+    </script>
 <script type="importmap">
 {
   "imports": {
