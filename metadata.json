@@ -1,0 +1,5 @@
+{
+  "name": "Sub2Article AI",
+  "description": "Transform messy video transcripts and subtitles into beautifully structured articles using Gemini AI. Fixes typos and organizes paragraphs while preserving the original content.",
+  "requestFramePermissions": []
+}
