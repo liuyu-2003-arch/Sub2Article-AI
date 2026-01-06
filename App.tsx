@@ -25,7 +25,10 @@ import {
   ChevronRight,
   X,
   PenTool,
-  Brain
+  Brain,
+  Cloud,
+  CloudOff,
+  CloudUpload
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream } from './services/geminiService';
@@ -42,6 +45,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
   const [progress, setProgress] = useState(0);
@@ -137,6 +141,22 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const handleManualSync = async () => {
+    if (!outputText || !user || isSaving) return;
+    setIsSaving(true);
+    setSaveError(false);
+    try {
+      await uploadToR2(outputText, user.id);
+      setIsSaved(true);
+      if (showHistory) fetchHistory();
+    } catch (r2Error) {
+      console.error("Manual sync to R2 failed", r2Error);
+      setSaveError(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleProcess = async () => {
     if (!inputText.trim() || !user) return;
     
@@ -145,6 +165,7 @@ const App: React.FC = () => {
     setError(null);
     setIsSaved(false);
     setIsSaving(false);
+    setSaveError(false);
     
     try {
       const stream = processSubtitleToArticleStream(inputText);
@@ -164,6 +185,7 @@ const App: React.FC = () => {
           if (showHistory) fetchHistory();
         } catch (r2Error) {
           console.error("Auto-save to R2 failed", r2Error);
+          setSaveError(true);
         } finally {
           setIsSaving(false);
         }
@@ -178,6 +200,7 @@ const App: React.FC = () => {
     setStatus(AppStatus.LOADING);
     setShowHistory(false);
     setError(null);
+    setSaveError(false);
     try {
       const content = await getArticleContent(key);
       setOutputText(content);
@@ -207,6 +230,7 @@ const App: React.FC = () => {
     setProgress(0);
     setIsSaved(false);
     setIsSaving(false);
+    setSaveError(false);
   };
 
   const copyForNotion = () => {
@@ -331,6 +355,17 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+        {/* Progress Bar moved to page top, right below sticky header */}
+        {status === AppStatus.LOADING && (
+          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-100 z-50">
+            <div 
+              className="h-full gradient-bg transition-all duration-500 ease-out relative shadow-[0_0_8px_rgba(99,102,241,0.6)]" 
+              style={{ width: `${progress}%` }} 
+            >
+              <div className="absolute top-0 right-0 h-full w-20 bg-gradient-to-r from-transparent to-white/40 animate-pulse" />
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 md:py-6 md:px-12 relative flex flex-col justify-center">
@@ -515,20 +550,36 @@ const App: React.FC = () => {
         ) : (
           <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-              <div className="flex-1">
+              <div className="flex-1 flex flex-col gap-1">
                 <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3">
                   整理后的文章
-                  {status === AppStatus.LOADING && (
-                    <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full animate-bounce shadow-sm">
-                      <Zap className="w-3 h-3 fill-current" /> AI 创作中
-                    </div>
-                  )}
-                  {status === AppStatus.SUCCESS && isSaved && (
-                    <div className="flex items-center gap-1 px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold rounded-full border border-emerald-100 animate-in fade-in duration-300">
-                      <Check className="w-3 h-3" /> 已自动同步 R2 云端
-                    </div>
-                  )}
                 </h2>
+                {/* R2 Sync Status Indicators */}
+                {status === AppStatus.SUCCESS && (
+                  <div className="flex items-center gap-2">
+                    {isSaving ? (
+                      <div className="flex items-center gap-1.5 text-indigo-500 text-[10px] font-bold px-2 py-0.5 bg-indigo-50 rounded-md border border-indigo-100">
+                        <CloudUpload className="w-3 h-3 animate-bounce" /> 正在同步至 R2 云端...
+                      </div>
+                    ) : isSaved ? (
+                      <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-bold px-2 py-0.5 bg-emerald-50 rounded-md border border-emerald-100 animate-in fade-in zoom-in duration-300">
+                        <Cloud className="w-3 h-3" /> 已保存在 R2 云端
+                      </div>
+                    ) : saveError ? (
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 text-red-500 text-[10px] font-bold px-2 py-0.5 bg-red-50 rounded-md border border-red-100">
+                          <CloudOff className="w-3 h-3" /> 同步 R2 失败
+                        </div>
+                        <button 
+                          onClick={handleManualSync}
+                          className="text-[10px] font-bold text-indigo-500 hover:underline flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" /> 立即重试
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
               {outputText && (
                 <div className="flex flex-wrap gap-2">
@@ -544,16 +595,7 @@ const App: React.FC = () => {
             </div>
 
             <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 min-h-[50vh] relative overflow-hidden ${status === AppStatus.ERROR ? 'border-red-200 bg-red-50/10' : ''}`}>
-              {status === AppStatus.LOADING && (
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-slate-50 z-20">
-                  <div 
-                    className="h-full gradient-bg transition-all duration-500 ease-out relative shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
-                    style={{ width: `${progress}%` }} 
-                  >
-                    <div className="absolute top-0 right-0 h-full w-20 bg-gradient-to-r from-transparent to-white/30 animate-pulse" />
-                  </div>
-                </div>
-              )}
+              {/* Progress bar was here, moved to Header */}
               <div className="p-6 md:p-10">
                 {status === AppStatus.ERROR ? (
                   <div className="flex flex-col items-center justify-center h-full text-red-500 py-10 text-center gap-4">
@@ -586,10 +628,10 @@ const App: React.FC = () => {
                         
                         <div className="space-y-6 w-full max-w-sm">
                           <div className="text-center space-y-2">
-                            <p className="text-slate-700 font-bold text-lg animate-pulse">
+                            <p className="text-slate-700 font-bold text-lg">
                               {getLoadingMessage(progress)}
                             </p>
-                            <p className="text-slate-400 text-xs font-medium">正在利用 Gemini 1.5 Pro 级推理能力...</p>
+                            <p className="text-slate-400 text-xs font-medium">正在利用 Gemini 智能推理能力...</p>
                           </div>
                           
                           {/* Skeleton animation for text blocks */}
