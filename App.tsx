@@ -23,7 +23,9 @@ import {
   History,
   Trash2,
   ChevronRight,
-  X
+  X,
+  PenTool,
+  Brain
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream } from './services/geminiService';
@@ -94,13 +96,18 @@ const App: React.FC = () => {
     }
   }, [outputText, status]);
 
-  // Load History Logic
+  const getLoadingMessage = (p: number) => {
+    if (p < 25) return "正在唤醒 AI 助手...";
+    if (p < 50) return "正在分析视频转录结构...";
+    if (p < 75) return "正在智能分段与润色...";
+    return "即将完成，正在导出...";
+  };
+
   const fetchHistory = async () => {
     if (!user) return;
     setHistoryLoading(true);
     try {
       const items = await listArticles(user.id);
-      // Sort by last modified descending
       const sorted = items.sort((a: any, b: any) => 
         (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0)
       );
@@ -154,7 +161,6 @@ const App: React.FC = () => {
         try {
           await uploadToR2(fullText, user.id);
           setIsSaved(true);
-          // If history is open, refresh it
           if (showHistory) fetchHistory();
         } catch (r2Error) {
           console.error("Auto-save to R2 failed", r2Error);
@@ -214,9 +220,13 @@ const App: React.FC = () => {
     const element = document.createElement("a");
     const file = new Blob([outputText], {type: 'text/markdown'});
     element.href = URL.createObjectURL(file);
-    element.download = "整理后的文章.md";
+    const titleMatch = outputText.match(/^#+\s+(.*)/m);
+    let fileName = titleMatch ? titleMatch[1].trim() : "整理后的文章";
+    fileName = fileName.replace(/[\\/:*?"<>|]/g, "").substring(0, 100);
+    element.download = `${fileName || "整理后的文章"}.md`;
     document.body.appendChild(element);
     element.click();
+    document.body.removeChild(element);
   };
 
   const loginWithGoogle = async () => {
@@ -260,7 +270,6 @@ const App: React.FC = () => {
   };
 
   const formatKeyName = (key: string) => {
-    // Key format: articles/{userId}/YYYY-MM-DD-HH-mm-ss-SSS.md
     const parts = key.split('/');
     const fileName = parts[parts.length - 1];
     return fileName.replace('.md', '').replace(/-/g, ':').replace(/^(\d{4}):(\d{2}):(\d{2}):/, '$1-$2-$3 ');
@@ -281,14 +290,13 @@ const App: React.FC = () => {
       <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 py-4 px-6 sticky top-0 z-50 shadow-sm">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <a href="https://sub2.324893.xyz" className="flex items-center gap-2 group">
-              <div className="gradient-bg p-2 rounded-lg shadow-md group-hover:scale-105 transition-transform">
-                <FileText className="w-5 h-5 text-white" />
+            <a href="/" className="flex items-center gap-3 group">
+              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5 rounded-xl shadow-lg shadow-indigo-200 group-hover:rotate-6 transition-all duration-300">
+                <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold text-slate-800 tracking-tight leading-none">Sub2Article AI</span>
-                <span className="text-[10px] text-indigo-500 font-medium tracking-wide">sub2.324893.xyz</span>
-              </div>
+              <span className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-indigo-600 tracking-tight">
+                Sub2Article AI
+              </span>
             </a>
           </div>
           
@@ -305,7 +313,7 @@ const App: React.FC = () => {
                 <div className="w-px h-6 bg-slate-200 hidden sm:block"></div>
               </>
             )}
-            {user ? (
+            {user && (
               <div className="flex items-center gap-3">
                 <div className="hidden md:flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
@@ -320,17 +328,12 @@ const App: React.FC = () => {
                   <LogOut className="w-5 h-5" />
                 </button>
               </div>
-            ) : (
-              <a href="https://324893.xyz" target="_blank" className="hidden md:flex items-center gap-1.5 text-slate-400 hover:text-slate-600 text-xs font-medium">
-                <Globe className="w-3.5 h-3.5" /> 324893.xyz
-              </a>
             )}
           </div>
         </div>
       </header>
 
       <main className="flex-1 max-w-4xl w-full mx-auto p-4 md:py-6 md:px-12 relative flex flex-col justify-center">
-        {/* History Sidebar/Drawer */}
         {showHistory && user && (
           <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/20 backdrop-blur-sm animate-in fade-in duration-300">
             <div className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-500">
@@ -476,8 +479,8 @@ const App: React.FC = () => {
         ) : status === AppStatus.IDLE ? (
           <div className="space-y-6 animate-in fade-in duration-500">
             <div className="text-center space-y-1">
-              <h2 className="text-3xl font-bold text-slate-900 flex items-center justify-center gap-3">
-                <Sparkles className="w-8 h-8 text-indigo-500" /> 整理您的视频转录
+              <h2 className="text-3xl font-extrabold text-slate-900 flex items-center justify-center gap-3">
+                <Sparkles className="w-8 h-8 text-indigo-500 animate-pulse" /> 整理您的视频转录
               </h2>
               <p className="text-slate-500 text-sm">将混乱的语音识别文本转化为优雅的结构化文章</p>
             </div>
@@ -516,7 +519,7 @@ const App: React.FC = () => {
                 <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3">
                   整理后的文章
                   {status === AppStatus.LOADING && (
-                    <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full animate-bounce">
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-bold rounded-full animate-bounce shadow-sm">
                       <Zap className="w-3 h-3 fill-current" /> AI 创作中
                     </div>
                   )}
@@ -542,14 +545,23 @@ const App: React.FC = () => {
 
             <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 min-h-[50vh] relative overflow-hidden ${status === AppStatus.ERROR ? 'border-red-200 bg-red-50/10' : ''}`}>
               {status === AppStatus.LOADING && (
-                <div className="absolute top-0 left-0 right-0 h-1 bg-slate-100 z-20">
-                  <div className="h-full gradient-bg transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-slate-50 z-20">
+                  <div 
+                    className="h-full gradient-bg transition-all duration-500 ease-out relative shadow-[0_0_10px_rgba(99,102,241,0.5)]" 
+                    style={{ width: `${progress}%` }} 
+                  >
+                    <div className="absolute top-0 right-0 h-full w-20 bg-gradient-to-r from-transparent to-white/30 animate-pulse" />
+                  </div>
                 </div>
               )}
               <div className="p-6 md:p-10">
                 {status === AppStatus.ERROR ? (
                   <div className="flex flex-col items-center justify-center h-full text-red-500 py-10 text-center gap-4">
-                    <AlertCircle className="w-12 h-12" /><div className="space-y-1"><p className="text-lg font-bold">处理失败</p><p className="text-slate-600 text-sm">{error}</p></div>
+                    <AlertCircle className="w-12 h-12" />
+                    <div className="space-y-1">
+                      <p className="text-lg font-bold">处理失败</p>
+                      <p className="text-slate-600 text-sm">{error}</p>
+                    </div>
                     <button onClick={handleProcess} className="mt-2 text-indigo-600 font-bold hover:underline text-sm">尝试重试</button>
                   </div>
                 ) : (
@@ -557,12 +569,37 @@ const App: React.FC = () => {
                     {outputText ? (
                       <div className="text-slate-800 leading-relaxed">
                         <ReactMarkdown>{outputText}</ReactMarkdown>
-                        {status === AppStatus.LOADING && <div className="inline-flex items-center gap-1"><span className="inline-block w-2 h-5 bg-indigo-500 animate-pulse align-middle" /></div>}
+                        {status === AppStatus.LOADING && (
+                          <div className="inline-flex items-center gap-1">
+                            <span className="inline-block w-2 h-5 bg-indigo-500 animate-pulse align-middle" />
+                          </div>
+                        )}
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-4">
-                        <RefreshCw className="w-12 h-12 animate-spin text-indigo-500/30" />
-                        <p className="text-slate-600 font-semibold text-base">正在唤醒 AI 助手...</p>
+                      <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-8">
+                        <div className="relative">
+                          <div className="absolute -inset-4 bg-indigo-100/50 rounded-full animate-ping opacity-25" />
+                          <div className="relative bg-white p-6 rounded-3xl shadow-2xl border border-slate-100 animate-float">
+                            <Brain className="w-12 h-12 text-indigo-600" />
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-6 w-full max-w-sm">
+                          <div className="text-center space-y-2">
+                            <p className="text-slate-700 font-bold text-lg animate-pulse">
+                              {getLoadingMessage(progress)}
+                            </p>
+                            <p className="text-slate-400 text-xs font-medium">正在利用 Gemini 1.5 Pro 级推理能力...</p>
+                          </div>
+                          
+                          {/* Skeleton animation for text blocks */}
+                          <div className="space-y-4 opacity-40">
+                            <div className="h-4 bg-slate-100 rounded-full w-3/4 animate-pulse" style={{ animationDelay: '0ms' }} />
+                            <div className="h-4 bg-slate-100 rounded-full w-full animate-pulse" style={{ animationDelay: '200ms' }} />
+                            <div className="h-4 bg-slate-100 rounded-full w-5/6 animate-pulse" style={{ animationDelay: '400ms' }} />
+                            <div className="h-4 bg-slate-100 rounded-full w-2/3 animate-pulse" style={{ animationDelay: '600ms' }} />
+                          </div>
+                        </div>
                       </div>
                     )}
                     <div ref={outputEndRef} />
@@ -574,11 +611,15 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="py-4 px-6 border-t border-slate-100 mt-auto bg-white/50">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-center gap-3 md:gap-8 text-[10px] text-slate-400 font-medium">
-          <a href="https://324893.xyz" target="_blank" className="hover:text-indigo-600 transition-colors flex items-center gap-1.5"><Globe className="w-3 h-3" /> 主页: 324893.xyz</a>
+      <footer className="py-6 px-6 border-t border-slate-100 mt-auto bg-white/50">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-center gap-3 md:gap-8 text-[11px] text-slate-400 font-medium">
+          <a href="https://324893.xyz" target="_blank" className="hover:text-indigo-600 transition-colors flex items-center gap-1.5 group">
+            <Globe className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" /> 官方主页: 324893.xyz
+          </a>
           <div className="hidden md:block w-px h-3 bg-slate-200"></div>
-          <p>由 Google Gemini AI 驱动 · 智能分段 & 错别字纠正 · 自动同步 R2 云端</p>
+          <p className="flex items-center gap-2">
+            <Sparkles className="w-3 h-3 text-indigo-400" /> 由 Google Gemini AI 驱动 · 智能分段 & 错别字纠正 · 自动同步 R2 云端
+          </p>
         </div>
       </footer>
     </div>
