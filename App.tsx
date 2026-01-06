@@ -355,7 +355,6 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
-        {/* Progress Bar moved to page top, right below sticky header */}
         {status === AppStatus.LOADING && (
           <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-100 z-50">
             <div 
@@ -554,48 +553,55 @@ const App: React.FC = () => {
                 <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3">
                   整理后的文章
                 </h2>
-                {/* R2 Sync Status Indicators */}
-                {status === AppStatus.SUCCESS && (
-                  <div className="flex items-center gap-2">
-                    {isSaving ? (
-                      <div className="flex items-center gap-1.5 text-indigo-500 text-[10px] font-bold px-2 py-0.5 bg-indigo-50 rounded-md border border-indigo-100">
-                        <CloudUpload className="w-3 h-3 animate-bounce" /> 正在同步至 R2 云端...
-                      </div>
-                    ) : isSaved ? (
-                      <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-bold px-2 py-0.5 bg-emerald-50 rounded-md border border-emerald-100 animate-in fade-in zoom-in duration-300">
-                        <Cloud className="w-3 h-3" /> 已保存在 R2 云端
-                      </div>
-                    ) : saveError ? (
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1.5 text-red-500 text-[10px] font-bold px-2 py-0.5 bg-red-50 rounded-md border border-red-100">
-                          <CloudOff className="w-3 h-3" /> 同步 R2 失败
-                        </div>
-                        <button 
-                          onClick={handleManualSync}
-                          className="text-[10px] font-bold text-indigo-500 hover:underline flex items-center gap-1"
-                        >
-                          <RefreshCw className="w-2.5 h-2.5" /> 立即重试
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                )}
               </div>
               {outputText && (
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={copyForNotion} className="flex items-center gap-2 px-4 py-1.5 bg-black text-white rounded-xl hover:bg-slate-800 transition-all text-xs font-bold shadow-md shadow-slate-200">
-                    {notionCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <div className="w-3 h-3 bg-white rounded-[2px] flex items-center justify-center"><span className="text-black font-bold text-[8px]">N</span></div>}
-                    {notionCopied ? '已复制' : '复制到 Notion'}
-                  </button>
-                  <button onClick={downloadResult} className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-lg shadow-indigo-200">
-                    <Download className="w-3.5 h-3.5" /> 下载 MD
-                  </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Sync Status Moved Here */}
+                  {status === AppStatus.SUCCESS && (
+                    <div className="flex items-center">
+                      {isSaving ? (
+                        <div className="flex items-center gap-1.5 text-indigo-500 text-[10px] font-bold px-2.5 py-1.5 bg-indigo-50 rounded-xl border border-indigo-100/50">
+                          <CloudUpload className="w-3 h-3 animate-bounce" /> 正在同步...
+                        </div>
+                      ) : isSaved ? (
+                        <div className="flex items-center gap-1.5 text-emerald-600 text-[10px] font-bold px-2.5 py-1.5 bg-emerald-50 rounded-xl border border-emerald-100/50 animate-in fade-in zoom-in">
+                          <Cloud className="w-3 h-3" /> 已保存在 R2
+                        </div>
+                      ) : saveError ? (
+                        <div className="flex items-center gap-2 bg-red-50 px-2.5 py-1.5 rounded-xl border border-red-100/50">
+                          <div className="flex items-center gap-1.5 text-red-500 text-[10px] font-bold">
+                            <CloudOff className="w-3 h-3" /> 同步失败
+                          </div>
+                          <button 
+                            onClick={handleManualSync}
+                            className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-1"
+                          >
+                            <RefreshCw className="w-2.5 h-2.5" /> 重试
+                          </button>
+                        </div>
+                      ) : null}
+                      
+                      {/* Visual Divider between Sync and Action Buttons */}
+                      {(isSaving || isSaved || saveError) && (
+                        <div className="w-px h-5 bg-slate-200 mx-2"></div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <button onClick={copyForNotion} className="flex items-center gap-2 px-4 py-1.5 bg-black text-white rounded-xl hover:bg-slate-800 transition-all text-xs font-bold shadow-md shadow-slate-200 group">
+                      {notionCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <div className="w-3 h-3 bg-white rounded-[2px] flex items-center justify-center transition-transform group-active:scale-90"><span className="text-black font-bold text-[8px]">N</span></div>}
+                      {notionCopied ? '已复制' : '复制到 Notion'}
+                    </button>
+                    <button onClick={downloadResult} className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-lg shadow-indigo-200">
+                      <Download className="w-3.5 h-3.5" /> 下载 MD
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
 
             <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 min-h-[50vh] relative overflow-hidden ${status === AppStatus.ERROR ? 'border-red-200 bg-red-50/10' : ''}`}>
-              {/* Progress bar was here, moved to Header */}
               <div className="p-6 md:p-10">
                 {status === AppStatus.ERROR ? (
                   <div className="flex flex-col items-center justify-center h-full text-red-500 py-10 text-center gap-4">
@@ -634,7 +640,6 @@ const App: React.FC = () => {
                             <p className="text-slate-400 text-xs font-medium">正在利用 Gemini 智能推理能力...</p>
                           </div>
                           
-                          {/* Skeleton animation for text blocks */}
                           <div className="space-y-4 opacity-40">
                             <div className="h-4 bg-slate-100 rounded-full w-3/4 animate-pulse" style={{ animationDelay: '0ms' }} />
                             <div className="h-4 bg-slate-100 rounded-full w-full animate-pulse" style={{ animationDelay: '200ms' }} />
