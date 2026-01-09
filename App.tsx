@@ -9,7 +9,12 @@ import {
   Sparkles,
   Zap,
   Globe,
-  Brain
+  Brain,
+  FileText,
+  Trash2,
+  Copy,
+  ChevronRight,
+  ArrowRight
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream } from './services/geminiService';
@@ -18,6 +23,7 @@ import { AppStatus } from './types';
 const App: React.FC = () => {
   const [inputText, setInputText] = useState<string>('');
   const [outputText, setOutputText] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
@@ -25,7 +31,6 @@ const App: React.FC = () => {
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  // 模拟进度条逻辑
   useEffect(() => {
     let interval: number;
     if (status === AppStatus.LOADING) {
@@ -42,7 +47,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [status]);
 
-  // 自动滚动到底部
   useEffect(() => {
     if (status === AppStatus.LOADING || status === AppStatus.SUCCESS) {
       outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,15 +54,18 @@ const App: React.FC = () => {
   }, [outputText, status]);
 
   const getLoadingMessage = (p: number) => {
-    if (p < 25) return "正在唤醒 AI 助手...";
-    if (p < 50) return "正在分析视频转录结构...";
-    if (p < 75) return "正在智能分段与润色...";
-    return "即将完成，正在导出...";
+    if (p < 25) return "AI 助手已就绪...";
+    if (p < 50) return "解析语言逻辑中...";
+    if (p < 75) return "内容重组与分段优化...";
+    return "即将完成，准备润色输出...";
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+    setFileName(nameWithoutExt);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -71,13 +78,15 @@ const App: React.FC = () => {
   const handleProcess = async () => {
     if (!inputText.trim()) return;
     
-    setOutputText('');
+    // 自动将文件名作为 H1 标题
+    const initialText = fileName ? `# ${fileName}\n\n` : '';
+    setOutputText(initialText);
     setStatus(AppStatus.LOADING);
     setError(null);
     
     try {
       const stream = processSubtitleToArticleStream(inputText);
-      let fullText = '';
+      let fullText = initialText;
       for await (const chunk of stream) {
         fullText += chunk;
         setOutputText(fullText);
@@ -93,6 +102,7 @@ const App: React.FC = () => {
   const reset = () => {
     setStatus(AppStatus.IDLE);
     setOutputText('');
+    setFileName('');
     setError(null);
     setProgress(0);
   };
@@ -108,155 +118,211 @@ const App: React.FC = () => {
     const element = document.createElement("a");
     const file = new Blob([outputText], {type: 'text/markdown'});
     element.href = URL.createObjectURL(file);
+    
     const titleMatch = outputText.match(/^#+\s+(.*)/m);
-    let fileName = titleMatch ? titleMatch[1].trim() : "整理后的文章";
-    fileName = fileName.replace(/[\\/:*?"<>|]/g, "").substring(0, 100);
-    element.download = `${fileName || "整理后的文章"}.md`;
+    let downloadName = titleMatch ? titleMatch[1].trim() : (fileName || "整理后的文章");
+    downloadName = downloadName.replace(/[\\/:*?"<>|]/g, "").substring(0, 100);
+    
+    element.download = `${downloadName}.md`;
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 py-4 px-6 sticky top-0 z-50 shadow-sm">
+    <div className="min-h-screen flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
+      <header className="bg-white/80 backdrop-blur-md border-b border-slate-100 py-4 px-6 sticky top-0 z-50 transition-all">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <a href="/" className="flex items-center gap-3 group">
-              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5 rounded-xl shadow-lg shadow-indigo-200 group-hover:rotate-6 transition-all duration-300">
+            <a href="/" className="flex items-center gap-2.5 group">
+              <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-2 rounded-xl shadow-lg shadow-indigo-100 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-indigo-600 tracking-tight">
-                Sub2Article AI
+              <span className="text-xl font-bold text-slate-900 tracking-tight">
+                Sub2Article <span className="text-indigo-600">AI</span>
               </span>
             </a>
           </div>
           
-          <div className="flex items-center gap-3">
-             <button 
-              onClick={reset}
-              className="text-slate-400 hover:text-indigo-600 transition-colors text-xs font-bold"
-            >
-              重新开始
-            </button>
+          <div className="flex items-center gap-4">
+            {status !== AppStatus.IDLE && (
+              <button 
+                onClick={reset}
+                className="text-slate-400 hover:text-red-500 transition-colors text-xs font-semibold flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> 重新开始
+              </button>
+            )}
+            <div className="h-4 w-px bg-slate-100 hidden sm:block" />
+            <a href="https://324893.xyz" target="_blank" className="text-slate-400 hover:text-indigo-600 transition-colors hidden sm:block">
+              <Globe className="w-4 h-4" />
+            </a>
           </div>
         </div>
         {status === AppStatus.LOADING && (
-          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-100 z-50">
+          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-50 z-50">
             <div 
-              className="h-full gradient-bg transition-all duration-500 ease-out relative shadow-[0_0_8px_rgba(99,102,241,0.6)]" 
+              className="h-full gradient-bg transition-all duration-500 ease-out relative shadow-[0_0_12px_rgba(99,102,241,0.5)]" 
               style={{ width: `${progress}%` }} 
             >
-              <div className="absolute top-0 right-0 h-full w-20 bg-gradient-to-r from-transparent to-white/40 animate-pulse" />
+              <div className="absolute top-0 right-0 h-full w-24 bg-gradient-to-r from-transparent to-white/30 animate-pulse" />
             </div>
           </div>
         )}
       </header>
 
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 md:py-6 md:px-12 relative flex flex-col justify-center">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 md:py-12 flex flex-col justify-start">
         {status === AppStatus.IDLE ? (
-          <div className="space-y-6 animate-in fade-in duration-500">
-            <div className="text-center space-y-1">
-              <h2 className="text-3xl font-extrabold text-slate-900 flex items-center justify-center gap-3">
-                <Sparkles className="w-8 h-8 text-indigo-500 animate-pulse" /> 整理您的视频转录
+          <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700">
+            <div className="text-center space-y-3">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold tracking-wide uppercase">
+                <Zap className="w-3 h-3 fill-indigo-600" /> Powered by Gemini
+              </div>
+              <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight sm:text-5xl">
+                让字幕变成 <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">优美文章</span>
               </h2>
-              <p className="text-slate-500 text-sm">将混乱的语音识别文本转化为优雅的结构化文章</p>
+              <p className="text-slate-500 text-lg max-w-2xl mx-auto">
+                将视频转录的混乱文本一键转换为结构清晰、无错别字的 Markdown 文章。
+              </p>
             </div>
 
-            <div className="bg-white rounded-3xl shadow-xl shadow-indigo-100/50 border border-slate-100 overflow-hidden max-w-3xl mx-auto">
-              <div className="p-6 space-y-4">
-                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                  <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-                    <Upload className="w-5 h-5 text-indigo-500" /> 粘贴文本或上传文件
-                  </h3>
-                  <label className="cursor-pointer bg-slate-50 hover:bg-indigo-50 border border-dashed border-slate-300 hover:border-indigo-400 text-slate-600 hover:text-indigo-600 px-4 py-1.5 rounded-xl text-xs font-medium transition-all flex items-center gap-2">
-                    <Upload className="w-3.5 h-3.5" /> 选择文件 (.txt, .srt)
+            <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/60 border border-slate-100 p-2 overflow-hidden transition-all hover:shadow-indigo-100/40">
+              <div className="bg-slate-50/50 rounded-[2rem] p-6 space-y-6">
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-600 rounded-lg text-white">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <h3 className="font-bold text-slate-800">
+                      输入您的转录文本
+                    </h3>
+                  </div>
+                  <label className="group cursor-pointer bg-white hover:bg-indigo-600 border border-slate-200 hover:border-indigo-600 px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm text-slate-600 hover:text-white">
+                    <Upload className="w-3.5 h-3.5 transition-transform group-hover:-translate-y-0.5" /> 导入文件 (.txt, .srt)
                     <input type="file" className="hidden" accept=".txt,.srt" onChange={handleFileUpload} />
                   </label>
                 </div>
-                <textarea
-                  className="w-full h-48 p-5 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 resize-none bg-slate-50/50 text-slate-700 leading-relaxed transition-all outline-none text-sm"
-                  placeholder="在此粘贴您的字幕或视频转录内容..."
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                />
+
+                <div className="relative group">
+                  <textarea
+                    className="w-full h-56 p-6 rounded-2xl border-none focus:ring-0 resize-none bg-white text-slate-700 leading-relaxed transition-all outline-none text-base placeholder:text-slate-300"
+                    placeholder="在此粘贴您的字幕内容，AI 会自动为您整理分段..."
+                    value={inputText}
+                    onChange={(e) => setInputText(e.target.value)}
+                  />
+                  {fileName && (
+                    <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-bold border border-emerald-100 animate-in fade-in slide-in-from-top-2">
+                      <Check className="w-3 h-3" />
+                      {fileName}
+                    </div>
+                  )}
+                  <div className="absolute inset-0 rounded-2xl border-2 border-transparent group-focus-within:border-indigo-500/10 pointer-events-none transition-all" />
+                </div>
+
                 <button
                   onClick={handleProcess}
                   disabled={!inputText.trim()}
-                  className={`w-full py-3.5 rounded-2xl font-bold text-base flex items-center justify-center gap-3 transition-all transform active:scale-[0.98] ${!inputText.trim() ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'gradient-bg text-white hover:shadow-xl hover:shadow-indigo-500/20'}`}
+                  className={`group w-full py-4 rounded-2xl font-extrabold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.98] ${!inputText.trim() ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'gradient-bg text-white hover:shadow-xl hover:shadow-indigo-500/30'}`}
                 >
-                  <Sparkles className="w-5 h-5" /> 开始智能整理
+                  <Sparkles className={`w-5 h-5 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} /> 
+                  开启智能整理
+                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </button>
               </div>
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-4">
+              {[
+                { title: '智能分段', desc: '根据语义自动划分自然段落', icon: Brain },
+                { title: '错别字纠正', desc: '自动修复语音识别常见的谐音错字', icon: Check },
+                { title: '保持原意', desc: '不删减任何核心信息，保留原始内容', icon: Zap }
+              ].map((feature, i) => (
+                <div key={i} className="bg-white p-5 rounded-3xl border border-slate-100 flex flex-col items-center text-center space-y-2 hover:border-indigo-100 transition-colors">
+                  <div className="p-2 bg-indigo-50 rounded-xl text-indigo-600 mb-2">
+                    <feature.icon className="w-5 h-5" />
+                  </div>
+                  <h4 className="font-bold text-slate-800 text-sm">{feature.title}</h4>
+                  <p className="text-slate-400 text-xs leading-relaxed">{feature.desc}</p>
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
-          <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-500">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-              <div className="flex-1 flex flex-col gap-1">
-                <h2 className="text-xl font-bold text-slate-900 flex items-center gap-3">
-                  整理后的文章
+          <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-700">
+            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white/50 backdrop-blur-sm p-3 rounded-2xl border border-slate-100/50">
+              <div className="flex items-center gap-3 px-2">
+                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm font-bold text-slate-800">
+                  整理结果已生成
                 </h2>
               </div>
               {outputText && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <button onClick={copyForNotion} className="flex items-center gap-2 px-4 py-1.5 bg-black text-white rounded-xl hover:bg-slate-800 transition-all text-xs font-bold shadow-md shadow-slate-200 group">
-                      {notionCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <div className="w-3 h-3 bg-white rounded-[2px] flex items-center justify-center transition-transform group-active:scale-90"><span className="text-black font-bold text-[8px]">N</span></div>}
-                      {notionCopied ? '已复制' : '复制到 Notion'}
-                    </button>
-                    <button onClick={downloadResult} className="flex items-center gap-2 px-4 py-1.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-lg shadow-indigo-200">
-                      <Download className="w-3.5 h-3.5" /> 下载 MD
-                    </button>
-                  </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={copyForNotion} className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all text-xs font-bold shadow-lg shadow-slate-200 group relative whitespace-nowrap">
+                    {notionCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-white" />}
+                    {notionCopied ? '已复制全文' : '复制全文'}
+                    {notionCopied && <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] py-1 px-2 rounded-md animate-bounce">Success!</div>}
+                  </button>
+                  <button onClick={downloadResult} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-lg shadow-indigo-100 whitespace-nowrap">
+                    <Download className="w-3.5 h-3.5" /> 下载 Markdown
+                  </button>
                 </div>
               )}
             </div>
 
-            <div className={`bg-white rounded-3xl shadow-xl border border-slate-100 min-h-[50vh] relative overflow-hidden ${status === AppStatus.ERROR ? 'border-red-200 bg-red-50/10' : ''}`}>
-              <div className="p-6 md:p-10">
+            <div className={`bg-white rounded-[2.5rem] shadow-2xl shadow-indigo-100/20 border border-slate-100 min-h-[60vh] relative ${status === AppStatus.ERROR ? 'border-red-200 bg-red-50/10' : ''}`}>
+              <div className="p-8 md:p-14 lg:p-20">
                 {status === AppStatus.ERROR ? (
-                  <div className="flex flex-col items-center justify-center h-full text-red-500 py-10 text-center gap-4">
-                    <AlertCircle className="w-12 h-12" />
-                    <div className="space-y-1">
-                      <p className="text-lg font-bold">处理失败</p>
-                      <p className="text-slate-600 text-sm">{error}</p>
+                  <div className="flex flex-col items-center justify-center h-full text-red-500 py-20 text-center space-y-6">
+                    <div className="bg-red-50 p-4 rounded-full">
+                      <AlertCircle className="w-12 h-12" />
                     </div>
-                    <button onClick={handleProcess} className="mt-2 text-indigo-600 font-bold hover:underline text-sm">尝试重试</button>
+                    <div className="space-y-2">
+                      <p className="text-xl font-bold">处理遇到障碍</p>
+                      <p className="text-slate-500 text-sm max-w-xs mx-auto leading-relaxed">{error}</p>
+                    </div>
+                    <button onClick={handleProcess} className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all text-sm">重新尝试</button>
                   </div>
                 ) : (
-                  <article className="prose prose-sm md:prose-base prose-indigo max-w-none">
+                  <article className="prose prose-indigo max-w-none prose-h1:tracking-[0.1em] prose-h1:leading-normal prose-h1:text-center prose-h1:mb-12">
                     {outputText ? (
-                      <div className="text-slate-800 leading-relaxed">
+                      <div className="text-slate-700">
                         <ReactMarkdown>{outputText}</ReactMarkdown>
                         {status === AppStatus.LOADING && (
-                          <div className="inline-flex items-center gap-1">
-                            <span className="inline-block w-2 h-5 bg-indigo-500 animate-pulse align-middle" />
+                          <div className="inline-flex items-center mt-6">
+                            <span className="inline-block w-2 h-6 bg-indigo-500 animate-pulse align-middle" />
+                            <span className="ml-3 text-indigo-400 text-xs font-bold animate-pulse">AI 正在深度创作...</span>
                           </div>
                         )}
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-8">
+                      <div className="flex flex-col items-center justify-center py-24 gap-10">
                         <div className="relative">
-                          <div className="absolute -inset-4 bg-indigo-100/50 rounded-full animate-ping opacity-25" />
-                          <div className="relative bg-white p-6 rounded-3xl shadow-2xl border border-slate-100 animate-float">
-                            <Brain className="w-12 h-12 text-indigo-600" />
+                          <div className="absolute -inset-8 bg-indigo-50 rounded-full animate-ping opacity-20" />
+                          <div className="relative bg-white p-8 rounded-[2rem] shadow-2xl border border-slate-100 animate-float">
+                            <Brain className="w-16 h-16 text-indigo-600" />
                           </div>
                         </div>
                         
-                        <div className="space-y-6 w-full max-w-sm">
+                        <div className="space-y-8 w-full max-w-sm">
                           <div className="text-center space-y-2">
-                            <p className="text-slate-700 font-bold text-lg">
+                            <p className="text-slate-800 font-extrabold text-xl">
                               {getLoadingMessage(progress)}
                             </p>
-                            <p className="text-slate-400 text-xs font-medium">正在利用 Gemini 智能推理能力...</p>
+                            <div className="flex items-center justify-center gap-1">
+                              <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                              <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                              <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" />
+                            </div>
                           </div>
                           
-                          <div className="space-y-4 opacity-40">
-                            <div className="h-4 bg-slate-100 rounded-full w-3/4 animate-pulse" style={{ animationDelay: '0ms' }} />
-                            <div className="h-4 bg-slate-100 rounded-full w-full animate-pulse" style={{ animationDelay: '200ms' }} />
-                            <div className="h-4 bg-slate-100 rounded-full w-5/6 animate-pulse" style={{ animationDelay: '400ms' }} />
-                            <div className="h-4 bg-slate-100 rounded-full w-2/3 animate-pulse" style={{ animationDelay: '600ms' }} />
+                          <div className="space-y-5 px-6">
+                            <div className="h-2.5 bg-slate-50 rounded-full w-full animate-pulse" />
+                            <div className="h-2.5 bg-slate-50 rounded-full w-4/5 animate-pulse delay-75" />
+                            <div className="h-2.5 bg-slate-50 rounded-full w-5/6 animate-pulse delay-150" />
+                            <div className="h-2.5 bg-slate-50 rounded-full w-2/3 animate-pulse delay-200" />
                           </div>
                         </div>
                       </div>
@@ -270,15 +336,20 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="py-6 px-6 border-t border-slate-100 mt-auto bg-white/50">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-center gap-3 md:gap-8 text-[11px] text-slate-400 font-medium">
-          <a href="https://324893.xyz" target="_blank" className="hover:text-indigo-600 transition-colors flex items-center gap-1.5 group">
-            <Globe className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" /> 官方主页: 324893.xyz
-          </a>
-          <div className="hidden md:block w-px h-3 bg-slate-200"></div>
-          <p className="flex items-center gap-2">
-            <Sparkles className="w-3 h-3 text-indigo-400" /> 由 Google Gemini AI 驱动 · 智能分段 & 错别字纠正
-          </p>
+      <footer className="py-10 px-6 border-t border-slate-50 mt-auto bg-white/40">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-[11px] text-slate-400 font-semibold tracking-wider uppercase">
+             <div className="flex items-center gap-6">
+               <a href="https://324893.xyz" target="_blank" className="hover:text-indigo-600 transition-all flex items-center gap-1.5 group">
+                <Globe className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" /> 324893.xyz
+              </a>
+              <span className="w-1 h-1 bg-slate-200 rounded-full" />
+              <p>Gemini Intelligence</p>
+             </div>
+             <p className="flex items-center gap-2 text-slate-300">
+               智能字幕转文章 · 2025 · 让内容更有价值
+             </p>
+          </div>
         </div>
       </footer>
     </div>

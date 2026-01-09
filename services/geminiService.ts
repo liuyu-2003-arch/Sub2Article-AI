@@ -2,9 +2,12 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
 const PROMPT_TEMPLATE = `附件是一个视频语音识别转成的文字，帮我整理成段落，修改部分错别字，但是不要删除任何文字。【注意要整理成段落】
-请使用 Markdown 格式输出（例如：使用合适的标题、粗体强调重点、列表等），使生成的文章结构清晰且易于阅读。
+请使用 Markdown 格式输出（例如：使用合适的二级标题、粗体强调重点、列表等），使生成的文章结构清晰且易于阅读。
 
-【极其重要】：直接输出整理后的正文内容。禁止包含任何开场白、介绍语（如“以下是整理后的内容...”）、结语或任何解释性文字。`;
+【极其重要】：
+1. 直接输出整理后的正文内容。
+2. 禁止生成任何文章主标题（H1）或题目，因为题目已由系统自动提供。
+3. 禁止包含任何开场白、介绍语（如“以下是整理后的内容...”）、结语或任何解释性文字。`;
 
 /**
  * Processes subtitle text into a structured article using Gemini API.
@@ -26,7 +29,6 @@ export async function* processSubtitleToArticleStream(text: string) {
     });
 
     for await (const chunk of responseStream) {
-      // Accessing .text property directly as it is a getter, not a method
       const part = chunk as GenerateContentResponse;
       yield part.text || "";
     }

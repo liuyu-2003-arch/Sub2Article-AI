@@ -14,13 +14,14 @@
     <style>
         body {
             font-family: 'Inter', 'Noto+Sans+SC', sans-serif;
-            background-color: #f8fafc;
+            background-color: #fcfcfd;
+            color: #1e293b;
         }
         .gradient-bg {
             background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
         }
         .glass-effect {
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.7);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
         }
@@ -32,6 +33,23 @@
         .animate-float {
             animation: float 3s ease-in-out infinite;
         }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #e2e8f0;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #cbd5e1;
+        }
+        /* Prose customization */
+        .prose h1 { font-weight: 800; letter-spacing: -0.025em; color: #0f172a; margin-bottom: 1.5rem; }
+        .prose p { line-height: 1.75; margin-bottom: 1.25rem; color: #334155; }
     </style>
     <!-- 注入 process shim 兼容浏览器环境 -->
     <script>
@@ -46,8 +64,8 @@
     "react": "https://esm.sh/react@^19.2.3",
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "react-markdown": "https://esm.sh/react-markdown@^9.0.1",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.0",
-    "@aws-sdk/client-s3": "https://esm.sh/@aws-sdk/client-s3@^3.964.0"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.90.1",
+    "@aws-sdk/client-s3": "https://esm.sh/@aws-sdk/client-s3@^3.965.0"
   }
 }
 </script>
