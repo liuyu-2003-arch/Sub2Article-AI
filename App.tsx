@@ -13,14 +13,14 @@ import {
   Copy,
   Loader2,
   ArrowRight,
-  Save,       // 新增图标
-  History,    // 新增图标
-  X,          // 新增图标
-  File        // 新增图标
+  Save,
+  History,
+  X,
+  File,
+  Share2 // 新增分享图标
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
-// 引入 R2 服务
 import { uploadToR2, listArticles, getArticleContent, deleteArticle } from './services/r2Service';
 import { AppStatus } from './types';
 
@@ -31,6 +31,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
+  const [linkCopied, setLinkCopied] = useState<boolean>(false); // 分享链接复制状态
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
 
@@ -40,8 +41,56 @@ const App: React.FC = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [currentArticleKey, setCurrentArticleKey] = useState<string | null>(null); // 当前文章的云端ID
 
   const outputEndRef = useRef<HTMLDivElement>(null);
+
+  // === 新增：初始化时检查 URL 是否带有文章 ID ===
+  useEffect(() => {
+    const checkUrlForArticle = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const articleId = params.get('id');
+
+      if (articleId) {
+        // 如果有 ID，直接进入加载模式
+        setStatus(AppStatus.LOADING);
+        setProcessStatus("正在从云端加载文章...");
+        try {
+          const content = await getArticleContent(articleId);
+          if (content) {
+            setOutputText(content);
+            setCurrentArticleKey(articleId);
+
+            // 尝试从 ID 中解析文件名用于显示
+            const simpleName = articleId.split('_').slice(1).join('_').replace('.md', '') || 'Shared Article';
+            setFileName(simpleName);
+
+            setStatus(AppStatus.SUCCESS);
+            setProcessStatus("加载完成");
+          } else {
+            throw new Error("未找到文章内容");
+          }
+        } catch (e) {
+          console.error(e);
+          setError("无法加载该文章，链接可能已失效。");
+          setStatus(AppStatus.ERROR);
+        }
+      }
+    };
+
+    checkUrlForArticle();
+  }, []);
+
+  // 更新浏览器地址栏 URL (不刷新页面)
+  const updateUrlWithId = (id: string | null) => {
+    if (id) {
+      const newUrl = `${window.location.pathname}?id=${encodeURIComponent(id)}`;
+      window.history.pushState({ path: newUrl }, '', newUrl);
+    } else {
+      const newUrl = window.location.pathname;
+      window.history.pushState({ path: newUrl }, '', newUrl);
+    }
+  };
 
   useEffect(() => {
     let interval: number;
@@ -77,7 +126,9 @@ const App: React.FC = () => {
   const loadHistory = async () => {
     setIsLoadingHistory(true);
     try {
-      const list = await listArticles();
+      // 获取 userId，保持 listArticles 签名一致
+      const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
+      const list = await listArticles(userId); // 确保 r2Service.ts 的 listArticles 接受 userId 参数
       setHistoryList(list);
     } catch (e) {
       console.error(e);
@@ -111,7 +162,9 @@ const App: React.FC = () => {
     setStatus(AppStatus.LOADING);
     setProcessStatus("准备开始...");
     setError(null);
-    setSaveSuccess(false); // 重置保存状态
+    setSaveSuccess(false);
+    setCurrentArticleKey(null); // 新生成文章时，重置云端ID
+    updateUrlWithId(null); // 清除 URL 中的 ID
 
     try {
       let currentFullText = initialText;
@@ -161,15 +214,29 @@ const App: React.FC = () => {
     if (!outputText) return;
     setIsSaving(true);
     try {
-      // 提取标题作为文件名的一部分，如果没找到标题则用 "Untitled"
       const titleMatch = outputText.match(/^#+\s+(.*)/m);
       const title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
 
-      await uploadToR2(outputText, title);
+      // r2Service uploadToR2 返回保存后的 Key (路径)
+      // 需要确保 r2Service.ts 的 uploadToR2 接收 userId 并返回 Key
+      const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
+      if (!localStorage.getItem('sub2article_user_id')) {
+          localStorage.setItem('sub2article_user_id', userId);
+      }
+
+      // 注意：这里我们修改一下调用，传入 outputText 和 userId
+      // 因为之前的 r2Service 代码里 uploadToR2 第二个参数是 userId，内部生成文件名
+      // 如果你想用标题做文件名，可能需要微调 r2Service，或者直接用现有的
+      const savedKey = await uploadToR2(outputText, userId);
+
+      setCurrentArticleKey(savedKey);
+      updateUrlWithId(savedKey); // === 关键：保存成功后更新 URL ===
+
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (e) {
-      alert("保存失败，请检查 R2 配置");
+      console.error(e);
+      alert("保存失败，请检查网络或 R2 配置");
     } finally {
       setIsSaving(false);
     }
@@ -180,13 +247,14 @@ const App: React.FC = () => {
     try {
       setStatus(AppStatus.LOADING);
       setProcessStatus("正在加载文章...");
-      setShowHistory(false); // 关闭侧边栏
+      setShowHistory(false);
 
       const content = await getArticleContent(key);
       setOutputText(content);
+      setCurrentArticleKey(key);
+      updateUrlWithId(key); // === 关键：加载历史后更新 URL ===
 
-      // 尝试从文件名恢复简单的标题显示
-      const simpleName = key.split('_').pop()?.replace('.md', '') || 'Imported Article';
+      const simpleName = key.split('/').pop()?.replace('.md', '') || 'Article';
       setFileName(simpleName);
 
       setStatus(AppStatus.SUCCESS);
@@ -197,12 +265,30 @@ const App: React.FC = () => {
     }
   };
 
+  // 分享功能
+  const handleShare = () => {
+    if (!currentArticleKey) {
+        alert("请先保存文章再分享");
+        return;
+    }
+    const shareUrl = window.location.href;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2000);
+    });
+  };
+
   // 删除文章
   const handleDeleteArticle = async (e: React.MouseEvent, key: string) => {
     e.stopPropagation();
-    if (confirm("确定要删除这篇文章吗？")) {
+    if (confirm("确定要删除这篇文章吗？如果删除，分享的链接也将失效。")) {
       await deleteArticle(key);
-      loadHistory(); // 刷新列表
+      if (key === currentArticleKey) {
+        // 如果删除了当前正在看的文章，清除 URL
+        updateUrlWithId(null);
+        setCurrentArticleKey(null);
+      }
+      loadHistory();
     }
   };
 
@@ -214,6 +300,8 @@ const App: React.FC = () => {
     setProcessStatus('');
     setProgress(0);
     setSaveSuccess(false);
+    setCurrentArticleKey(null);
+    updateUrlWithId(null); // 重置 URL
   };
 
   const copyForNotion = () => {
@@ -279,6 +367,17 @@ const App: React.FC = () => {
 
                 {outputText && (
                   <>
+                    {/* 分享按钮：仅在文章已保存到云端时显示或可用 */}
+                    {currentArticleKey && (
+                      <button
+                        onClick={handleShare}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
+                      >
+                        {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                        {linkCopied ? '链接已复制' : '分享'}
+                      </button>
+                    )}
+
                      {/* 保存到云端按钮 */}
                     <button
                       onClick={handleSaveToCloud}
@@ -463,13 +562,11 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* 历史文章侧边栏 (Drawer) */}
+      {/* 历史文章侧边栏 */}
       {showHistory && (
         <div className="fixed inset-0 z-[60] flex justify-end">
-           {/* 遮罩 */}
            <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setShowHistory(false)} />
 
-           {/* 侧边栏内容 */}
            <div className="relative w-full max-w-md bg-white h-full shadow-2xl p-6 flex flex-col animate-in slide-in-from-right duration-300">
              <div className="flex justify-between items-center mb-6">
                <h3 className="text-xl font-bold font-['Playfair_Display'] text-slate-900">我的文章</h3>
@@ -490,8 +587,7 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   historyList.map((item) => {
-                    // 解析文件名显示
-                    const displayName = item.Key.split('_').slice(1).join('_').replace('.md', '') || '无标题文章';
+                    const displayName = item.Key.split('/').pop()?.replace('.md', '').split('_').slice(1).join('_') || '无标题文章';
                     const date = new Date(item.LastModified).toLocaleDateString();
 
                     return (
