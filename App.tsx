@@ -14,10 +14,11 @@ import {
   Loader2,
   ArrowRight,
   Save,
-  History,
-  X,
+  Share2,
+  Plus,          // 新增：添加图标
   File,
-  Share2 // 新增分享图标
+  Calendar,      // 新增：日历图标
+  LayoutGrid     // 新增：网格图标
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
@@ -31,28 +32,34 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
-  const [linkCopied, setLinkCopied] = useState<boolean>(false); // 分享链接复制状态
+  const [linkCopied, setLinkCopied] = useState<boolean>(false);
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
+
+  // === 视图控制 ===
+  // 'list' = 首页文章列表, 'create' = 上传/生成页面
+  const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
 
   // R2 相关状态
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [currentArticleKey, setCurrentArticleKey] = useState<string | null>(null); // 当前文章的云端ID
+  const [currentArticleKey, setCurrentArticleKey] = useState<string | null>(null);
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  // === 新增：初始化时检查 URL 是否带有文章 ID ===
+  // 初始化：加载列表，检查 URL
   useEffect(() => {
+    // 1. 加载历史文章列表
+    loadHistory();
+
+    // 2. 检查 URL 是否带有文章 ID
     const checkUrlForArticle = async () => {
       const params = new URLSearchParams(window.location.search);
       const articleId = params.get('id');
 
       if (articleId) {
-        // 如果有 ID，直接进入加载模式
         setStatus(AppStatus.LOADING);
         setProcessStatus("正在从云端加载文章...");
         try {
@@ -61,12 +68,12 @@ const App: React.FC = () => {
             setOutputText(content);
             setCurrentArticleKey(articleId);
 
-            // 尝试从 ID 中解析文件名用于显示
             const simpleName = articleId.split('_').slice(1).join('_').replace('.md', '') || 'Shared Article';
             setFileName(simpleName);
 
             setStatus(AppStatus.SUCCESS);
             setProcessStatus("加载完成");
+            // 加载成功后，视图逻辑上相当于进入了 create 模式的查看状态，或者保持 status=SUCCESS 覆盖 IDLE
           } else {
             throw new Error("未找到文章内容");
           }
@@ -77,11 +84,9 @@ const App: React.FC = () => {
         }
       }
     };
-
     checkUrlForArticle();
   }, []);
 
-  // 更新浏览器地址栏 URL (不刷新页面)
   const updateUrlWithId = (id: string | null) => {
     if (id) {
       const newUrl = `${window.location.pathname}?id=${encodeURIComponent(id)}`;
@@ -116,19 +121,11 @@ const App: React.FC = () => {
     }
   }, [outputText, status]);
 
-  // 加载历史文章列表
-  useEffect(() => {
-    if (showHistory) {
-      loadHistory();
-    }
-  }, [showHistory]);
-
   const loadHistory = async () => {
     setIsLoadingHistory(true);
     try {
-      // 获取 userId，保持 listArticles 签名一致
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
-      const list = await listArticles(userId); // 确保 r2Service.ts 的 listArticles 接受 userId 参数
+      const list = await listArticles(userId);
       setHistoryList(list);
     } catch (e) {
       console.error(e);
@@ -163,8 +160,8 @@ const App: React.FC = () => {
     setProcessStatus("准备开始...");
     setError(null);
     setSaveSuccess(false);
-    setCurrentArticleKey(null); // 新生成文章时，重置云端ID
-    updateUrlWithId(null); // 清除 URL 中的 ID
+    setCurrentArticleKey(null);
+    updateUrlWithId(null);
 
     try {
       let currentFullText = initialText;
@@ -209,7 +206,6 @@ const App: React.FC = () => {
     }
   };
 
-  // 保存到 R2
   const handleSaveToCloud = async () => {
     if (!outputText) return;
     setIsSaving(true);
@@ -217,22 +213,20 @@ const App: React.FC = () => {
       const titleMatch = outputText.match(/^#+\s+(.*)/m);
       const title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
 
-      // r2Service uploadToR2 返回保存后的 Key (路径)
-      // 需要确保 r2Service.ts 的 uploadToR2 接收 userId 并返回 Key
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
       if (!localStorage.getItem('sub2article_user_id')) {
           localStorage.setItem('sub2article_user_id', userId);
       }
 
-      // 注意：这里我们修改一下调用，传入 outputText 和 userId
-      // 因为之前的 r2Service 代码里 uploadToR2 第二个参数是 userId，内部生成文件名
-      // 如果你想用标题做文件名，可能需要微调 r2Service，或者直接用现有的
       const savedKey = await uploadToR2(outputText, userId);
 
       setCurrentArticleKey(savedKey);
-      updateUrlWithId(savedKey); // === 关键：保存成功后更新 URL ===
-
+      updateUrlWithId(savedKey);
       setSaveSuccess(true);
+
+      // 保存成功后刷新一下列表
+      loadHistory();
+
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (e) {
       console.error(e);
@@ -242,17 +236,16 @@ const App: React.FC = () => {
     }
   };
 
-  // 加载选中的历史文章
   const handleLoadArticle = async (key: string) => {
     try {
       setStatus(AppStatus.LOADING);
       setProcessStatus("正在加载文章...");
-      setShowHistory(false);
+      // 不再需要 setShowHistory(false)
 
       const content = await getArticleContent(key);
       setOutputText(content);
       setCurrentArticleKey(key);
-      updateUrlWithId(key); // === 关键：加载历史后更新 URL ===
+      updateUrlWithId(key);
 
       const simpleName = key.split('/').pop()?.replace('.md', '') || 'Article';
       setFileName(simpleName);
@@ -265,7 +258,6 @@ const App: React.FC = () => {
     }
   };
 
-  // 分享功能
   const handleShare = () => {
     if (!currentArticleKey) {
         alert("请先保存文章再分享");
@@ -278,22 +270,24 @@ const App: React.FC = () => {
     });
   };
 
-  // 删除文章
   const handleDeleteArticle = async (e: React.MouseEvent, key: string) => {
     e.stopPropagation();
     if (confirm("确定要删除这篇文章吗？如果删除，分享的链接也将失效。")) {
       await deleteArticle(key);
       if (key === currentArticleKey) {
-        // 如果删除了当前正在看的文章，清除 URL
         updateUrlWithId(null);
         setCurrentArticleKey(null);
+        // 如果删除了当前看的，回到列表
+        reset();
       }
       loadHistory();
     }
   };
 
+  // 重置回列表页 (点击 Logo 或 重新开始)
   const reset = () => {
     setStatus(AppStatus.IDLE);
+    setViewMode('list'); // 回到列表
     setOutputText('');
     setFileName('');
     setError(null);
@@ -301,7 +295,17 @@ const App: React.FC = () => {
     setProgress(0);
     setSaveSuccess(false);
     setCurrentArticleKey(null);
-    updateUrlWithId(null); // 重置 URL
+    updateUrlWithId(null);
+    loadHistory(); // 刷新列表
+  };
+
+  // 切换到创建页面
+  const goCreate = () => {
+      setStatus(AppStatus.IDLE);
+      setViewMode('create');
+      setOutputText('');
+      setFileName('');
+      updateUrlWithId(null);
   };
 
   const copyForNotion = () => {
@@ -329,25 +333,27 @@ const App: React.FC = () => {
       <header className="bg-white/95 backdrop-blur-sm border-b border-slate-200 py-3 px-4 md:px-6 sticky top-0 z-50 transition-all">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <a href="/" className="flex items-center gap-2 group">
+            <button onClick={reset} className="flex items-center gap-2 group">
               <div className="bg-slate-900 p-1.5 rounded-lg shadow-sm group-hover:scale-105 transition-all duration-300">
                 <Sparkles className="w-4 h-4 text-white" />
               </div>
               <span className="text-lg font-bold text-slate-900 tracking-tight font-['Inter'] hidden sm:inline">
                 Sub2Article <span className="text-slate-500 font-medium">AI</span>
               </span>
-            </a>
+            </button>
           </div>
 
           <div className="flex items-center gap-3">
-             {/* 历史文章按钮 */}
-             <button
-                onClick={() => setShowHistory(true)}
-                className="text-slate-500 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 font-['Inter']"
-              >
-                <History className="w-4 h-4" />
-                <span className="hidden sm:inline">我的文章</span>
-              </button>
+             {/* 仅在列表模式下显示“添加文章”按钮，或者始终显示 */}
+             {viewMode === 'list' && status === AppStatus.IDLE && (
+                <button
+                  onClick={goCreate}
+                  className="bg-slate-900 text-white hover:bg-slate-800 px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 font-['Inter'] shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span className="hidden sm:inline">添加文章</span>
+                </button>
+             )}
 
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
@@ -367,7 +373,7 @@ const App: React.FC = () => {
 
                 {outputText && (
                   <>
-                    {/* 分享按钮：仅在文章已保存到云端时显示或可用 */}
+                    {/* 分享按钮 */}
                     {currentArticleKey && (
                       <button
                         onClick={handleShare}
@@ -378,7 +384,7 @@ const App: React.FC = () => {
                       </button>
                     )}
 
-                     {/* 保存到云端按钮 */}
+                     {/* 保存按钮 */}
                     <button
                       onClick={handleSaveToCloud}
                       disabled={isSaving || saveSuccess}
@@ -417,10 +423,10 @@ const App: React.FC = () => {
                 <button
                   onClick={reset}
                   className="text-slate-400 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 font-['Inter']"
-                  title="重新开始"
+                  title="返回列表"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">重新开始</span>
+                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                  <span className="hidden sm:inline">返回列表</span>
                 </button>
               </div>
             )}
@@ -428,81 +434,137 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 flex flex-col justify-start">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8 flex flex-col justify-start">
         {status === AppStatus.IDLE ? (
-          <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
-            <div className="text-center space-y-4">
-              <h2 className="text-4xl font-black text-slate-900 tracking-tight sm:text-6xl font-['Playfair_Display']">
-                Turn Subtitles into <br/>
-                <span className="text-slate-500 italic">Beautiful Articles</span>
-              </h2>
-              <p className="text-slate-500 text-lg max-w-2xl mx-auto font-['Merriweather'] leading-relaxed">
-                将视频转录的混乱文本一键转换为结构清晰、排版优雅的中英对照文章。
-              </p>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 p-2 overflow-hidden transition-all hover:shadow-2xl hover:shadow-slate-200/80">
-              <div className="bg-slate-50 rounded-xl p-8 space-y-6">
-                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-slate-900 rounded-lg text-white">
-                      <FileText className="w-4 h-4" />
+          <>
+            {/* === 模式一：文章列表 (首页) === */}
+            {viewMode === 'list' && (
+               <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
+                  <div className="flex justify-between items-end border-b border-slate-100 pb-4">
+                    <div>
+                      <h2 className="text-3xl font-black text-slate-900 font-['Playfair_Display']">已保存的文章</h2>
+                      <p className="text-slate-500 text-sm mt-1 font-['Inter']">My Knowledge Base</p>
                     </div>
-                    <h3 className="font-bold text-slate-800 font-['Inter']">
-                      输入您的转录文本
-                    </h3>
                   </div>
-                  <label className="group cursor-pointer bg-white hover:bg-slate-900 border border-slate-200 hover:border-slate-900 px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 shadow-sm text-slate-600 hover:text-white font-['Inter']">
-                    <Upload className="w-3.5 h-3.5 transition-transform group-hover:-translate-y-0.5" /> 导入文件
-                    <input type="file" className="hidden" accept=".txt,.srt" onChange={handleFileUpload} />
-                  </label>
-                </div>
 
-                <div className="relative group">
-                  <textarea
-                    className="w-full h-56 p-6 rounded-xl border border-slate-200 focus:border-slate-400 focus:ring-0 resize-none bg-white text-slate-700 leading-relaxed transition-all outline-none text-base placeholder:text-slate-300 font-['Merriweather']"
-                    placeholder="在此粘贴您的字幕内容..."
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                  />
-                  {fileName && (
-                    <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold border border-emerald-100 animate-in fade-in slide-in-from-top-2 font-['Inter']">
-                      <Check className="w-3 h-3" />
-                      {fileName}
+                  {isLoadingHistory ? (
+                    <div className="flex justify-center py-20">
+                      <Loader2 className="w-8 h-8 animate-spin text-slate-300" />
+                    </div>
+                  ) : historyList.length === 0 ? (
+                    <div className="text-center py-24 bg-white rounded-2xl border border-dashed border-slate-200">
+                      <div className="inline-flex p-4 bg-slate-50 rounded-full mb-4">
+                        <LayoutGrid className="w-8 h-8 text-slate-300" />
+                      </div>
+                      <h3 className="text-lg font-bold text-slate-700 font-['Inter']">暂无文章</h3>
+                      <p className="text-slate-400 text-sm mt-2 mb-6">您还没有保存任何整理后的文章</p>
+                      <button onClick={goCreate} className="px-5 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-colors inline-flex items-center gap-2">
+                        <Plus className="w-4 h-4" /> 开始第一篇创作
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {historyList.map((item) => {
+                        const displayName = item.Key.split('/').pop()?.replace('.md', '').split('_').slice(1).join('_') || '无标题文章';
+                        const date = new Date(item.LastModified).toLocaleDateString();
+
+                        return (
+                          <div
+                            key={item.Key}
+                            onClick={() => handleLoadArticle(item.Key)}
+                            className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 hover:border-slate-200 transition-all cursor-pointer relative"
+                          >
+                             <div className="flex justify-between items-start mb-4">
+                               <div className="p-3 bg-slate-50 rounded-xl group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                                 <FileText className="w-6 h-6 text-slate-400 group-hover:text-indigo-600" />
+                               </div>
+                               <button
+                                  onClick={(e) => handleDeleteArticle(e, item.Key)}
+                                  className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                  title="删除"
+                               >
+                                 <Trash2 className="w-4 h-4" />
+                               </button>
+                             </div>
+
+                             <h3 className="text-lg font-bold text-slate-900 mb-2 line-clamp-2 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors">
+                               {displayName}
+                             </h3>
+
+                             <div className="flex items-center gap-2 text-xs text-slate-400 font-['Inter'] mt-4">
+                               <Calendar className="w-3.5 h-3.5" />
+                               <span>{date}</span>
+                             </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
+               </div>
+            )}
+
+            {/* === 模式二：上传/生成页面 === */}
+            {viewMode === 'create' && (
+              <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
+                <div className="text-center space-y-4">
+                  <h2 className="text-4xl font-black text-slate-900 tracking-tight sm:text-6xl font-['Playfair_Display']">
+                    Turn Subtitles into <br/>
+                    <span className="text-slate-500 italic">Beautiful Articles</span>
+                  </h2>
+                  <p className="text-slate-500 text-lg max-w-2xl mx-auto font-['Merriweather'] leading-relaxed">
+                    将视频转录的混乱文本一键转换为结构清晰、排版优雅的中英对照文章。
+                  </p>
                 </div>
 
-                <button
-                  onClick={handleProcess}
-                  disabled={!inputText.trim()}
-                  className={`group w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.99] font-['Inter'] ${!inputText.trim() ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/20'}`}
-                >
-                  <Sparkles className={`w-4 h-4 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} />
-                  开启智能整理
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </button>
-              </div>
-            </div>
+                <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 p-2 overflow-hidden transition-all hover:shadow-2xl hover:shadow-slate-200/80">
+                  <div className="bg-slate-50 rounded-xl p-8 space-y-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-900 rounded-lg text-white">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <h3 className="font-bold text-slate-800 font-['Inter']">
+                          输入您的转录文本
+                        </h3>
+                      </div>
+                      <label className="group cursor-pointer bg-white hover:bg-slate-900 border border-slate-200 hover:border-slate-900 px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 shadow-sm text-slate-600 hover:text-white font-['Inter']">
+                        <Upload className="w-3.5 h-3.5 transition-transform group-hover:-translate-y-0.5" /> 导入文件
+                        <input type="file" className="hidden" accept=".txt,.srt" onChange={handleFileUpload} />
+                      </label>
+                    </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-4 font-['Inter']">
-              {[
-                { title: '智能分段', desc: '根据语义自动划分自然段落', icon: Brain },
-                { title: '双语对照', desc: '英文段落与中文翻译一一对应', icon: Globe },
-                { title: '保持原意', desc: '不删减任何核心信息', icon: Zap }
-              ].map((feature, i) => (
-                <div key={i} className="p-5 rounded-2xl border border-transparent hover:border-slate-200 flex flex-col items-center text-center space-y-2 hover:bg-white transition-all">
-                  <div className="p-2 bg-slate-100 rounded-lg text-slate-600 mb-2">
-                    <feature.icon className="w-4 h-4" />
+                    <div className="relative group">
+                      <textarea
+                        className="w-full h-56 p-6 rounded-xl border border-slate-200 focus:border-slate-400 focus:ring-0 resize-none bg-white text-slate-700 leading-relaxed transition-all outline-none text-base placeholder:text-slate-300 font-['Merriweather']"
+                        placeholder="在此粘贴您的字幕内容..."
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                      />
+                      {fileName && (
+                        <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold border border-emerald-100 animate-in fade-in slide-in-from-top-2 font-['Inter']">
+                          <Check className="w-3 h-3" />
+                          {fileName}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={handleProcess}
+                      disabled={!inputText.trim()}
+                      className={`group w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.99] font-['Inter'] ${!inputText.trim() ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/20'}`}
+                    >
+                      <Sparkles className={`w-4 h-4 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} />
+                      开启智能整理
+                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    </button>
                   </div>
-                  <h4 className="font-bold text-slate-800 text-sm">{feature.title}</h4>
-                  <p className="text-slate-500 text-xs leading-relaxed">{feature.desc}</p>
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
+            )}
+          </>
         ) : (
           <div className="animate-in slide-in-from-bottom-4 duration-700">
+            {/* 文章展示区域 */}
             <div className={`bg-white min-h-[80vh] relative p-8 md:p-16 lg:px-24 border border-slate-100 shadow-sm ${status === AppStatus.ERROR && !outputText ? 'bg-red-50/10' : ''}`}>
               <div>
                 {status === AppStatus.ERROR && !outputText ? (
@@ -521,13 +583,9 @@ const App: React.FC = () => {
                     prose prose-stone max-w-none
                     prose-lg
                     prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900
-
                     prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left
-
                     prose-h2:text-2xl prose-h2:mt-1 prose-h2:mb-8 prose-h2:text-left prose-h2:text-slate-500 prose-h2:font-normal
-
                     prose-hr:my-10 prose-hr:border-slate-200
-
                     prose-p:font-['Merriweather'] prose-p:text-slate-800 prose-p:leading-loose prose-p:mb-6
                     prose-strong:font-bold prose-strong:text-slate-900
                   ">
@@ -561,64 +619,6 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
-
-      {/* 历史文章侧边栏 */}
-      {showHistory && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
-           <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setShowHistory(false)} />
-
-           <div className="relative w-full max-w-md bg-white h-full shadow-2xl p-6 flex flex-col animate-in slide-in-from-right duration-300">
-             <div className="flex justify-between items-center mb-6">
-               <h3 className="text-xl font-bold font-['Playfair_Display'] text-slate-900">我的文章</h3>
-               <button onClick={() => setShowHistory(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
-                 <X className="w-5 h-5" />
-               </button>
-             </div>
-
-             <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-                {isLoadingHistory ? (
-                  <div className="flex justify-center py-10">
-                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-                  </div>
-                ) : historyList.length === 0 ? (
-                  <div className="text-center py-20 text-slate-400 font-['Inter']">
-                    <p>暂无保存的文章</p>
-                    <p className="text-xs mt-2">点击“保存”按钮将文章存到云端</p>
-                  </div>
-                ) : (
-                  historyList.map((item) => {
-                    const displayName = item.Key.split('/').pop()?.replace('.md', '').split('_').slice(1).join('_') || '无标题文章';
-                    const date = new Date(item.LastModified).toLocaleDateString();
-
-                    return (
-                      <div key={item.Key}
-                           onClick={() => handleLoadArticle(item.Key)}
-                           className="group p-4 border border-slate-100 rounded-xl hover:border-slate-300 hover:bg-slate-50 cursor-pointer transition-all flex justify-between items-start"
-                      >
-                         <div className="flex items-start gap-3 overflow-hidden">
-                           <div className="mt-1 p-2 bg-white border border-slate-100 rounded-lg text-slate-500 group-hover:text-slate-900 group-hover:border-slate-300 transition-colors">
-                             <File className="w-4 h-4" />
-                           </div>
-                           <div className="flex-1 min-w-0">
-                             <h4 className="font-bold text-slate-800 text-sm truncate pr-2 font-['Inter'] group-hover:text-indigo-600 transition-colors">{displayName}</h4>
-                             <p className="text-xs text-slate-400 mt-1">{date}</p>
-                           </div>
-                         </div>
-                         <button
-                            onClick={(e) => handleDeleteArticle(e, item.Key)}
-                            className="text-slate-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                            title="删除"
-                         >
-                           <Trash2 className="w-4 h-4" />
-                         </button>
-                      </div>
-                    )
-                  })
-                )}
-             </div>
-           </div>
-        </div>
-      )}
 
       <footer className="py-8 px-6 border-t border-slate-200 mt-auto bg-white font-['Inter']">
         <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
