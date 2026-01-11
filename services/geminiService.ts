@@ -1,15 +1,17 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
-// 基础 Prompt
+// === 核心 Prompt 修改 ===
+// 1. 增加了“禁止使用列表符号”的指令
+// 2. 增加了“文章总结”的生成指令
 const BASE_PROMPT = `附件是一个视频语音识别转成的文字，请分析其语言内容并按以下规则整理：
 
 1. **如果是英文（或中英双语）内容**：
    - **第一步（合并）**：首先将细碎的字幕行合并成逻辑完整、通顺的【英文段落】。
    - **第二步（翻译）**：将整理好的英文段落翻译成地道的【中文段落】。
    - **第三步（输出格式）**：请严格按照**“一段英文，一段中文”**的格式输出。
-     * **正确格式示例**（注意：直接输出文字，不要加任何括号）：
+     * **正确格式示例**：
 
-       Here is the content of the first English paragraph. It should be a complete logical section.
+       Here is the content of the first English paragraph. It should be a complete logical section without any bullet points at the beginning.
 
        这是第一段英文对应的中文翻译内容。
 
@@ -17,16 +19,21 @@ const BASE_PROMPT = `附件是一个视频语音识别转成的文字，请分�
 
        这是第二段英文对应的中文翻译内容。
 
-   - **严禁**：不要一句英文一句中文地穿插，必须是以“自然段”为单位进行对照。
-   - **严禁**：英文段落首尾**绝对不要**添加方括号 [] 或其他标记符号。
+   - **严禁（非常重要）**：英文和中文段落开头**绝对不要**添加圆点（•）、短横线（-）、星号（*）等列表符号，直接输出纯文本。
+   - **完整性**：每一段英文后面**必须**紧跟其中文翻译，不得遗漏。
 
 2. **如果是纯中文内容**：
    - 请整理成通顺的中文段落，修改错别字，优化标点，保持逻辑清晰。
 
+3. **文章结尾要求**：
+   - 在正文全部结束后，请输出一个分隔线 `---`。
+   - 然后换行输出二级标题 `## 文章总结`。
+   - 接着用中文列出 3-5 点文章的核心内容总结。
+
 **通用极其重要规则**：
 - **完整性**：不要删除任何核心信息，保持内容完整。
 - **格式**：使用 Markdown 格式（如粗体强调重点等）。
-- **零废话**：**禁止**添加任何开场白（如“好的...”）或结语。`;
+- **零废话**：**禁止**添加任何开场白（如“好的...”），直接开始输出正文。`;
 
 const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成因为长度限制中断了。
 
@@ -35,13 +42,12 @@ const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成�
 
 【格式要求】：
 1. **严格保持**之前的格式（一段英文，一段中文）。
-2. **严禁**重复已生成的内容。
-3. **严禁**添加任何开场白，直接输出接续的正文。
-4. 英文段落首尾**不要**加方括号。
+2. **严禁**使用列表符号（如 • 或 -）作为段落开头。
+3. **严禁**重复已生成的内容。
+4. 如果正文已经结束，请检查是否已生成“文章总结”；如果没有，请在末尾补充分隔线 `---` 和 `## 文章总结`。
 
 【输入数据】：`;
 
-// === 关键点：必须导出这个接口 ===
 export interface StreamUpdate {
   text: string;
   isComplete: boolean;
@@ -51,7 +57,6 @@ export interface StreamUpdate {
  * 处理字幕的主函数
  */
 export async function* processSubtitleToArticleStream(text: string, title: string = ''): AsyncGenerator<StreamUpdate> {
-  // 确保 API KEY 存在
   if (!process.env.API_KEY) {
     throw new Error("Missing API Key");
   }
