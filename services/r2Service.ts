@@ -22,15 +22,14 @@ const s3Client = new S3Client({
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // 1. 过滤文件名：保留字母、数字、中文、下划线、空格(会被转为_)、连字符
-  // 正则说明：\w 匹配字母数字下划线，\u4e00-\u9fa5 匹配中文，\s 匹配空格
+  // 1. 过滤文件名
+  // 保留：字母、数字、中文、下划线、空格、连字符
   let safeTitle = title.replace(/[^\w\u4e00-\u9fa5\s-]/g, "");
-  safeTitle = safeTitle.replace(/\s+/g, "_"); // 将空格替换为下划线
+  safeTitle = safeTitle.replace(/\s+/g, "_"); // 空格变下划线
 
-  // 2. 长度限制增加到 200，以容纳双语标题
-  safeTitle = safeTitle.substring(0, 200);
+  // === 关键修复：长度限制扩大到 250，确保中文副标题不被截断 ===
+  safeTitle = safeTitle.substring(0, 250);
 
-  // 确保文件名不为空
   if (!safeTitle) safeTitle = "Untitled";
 
   const fileName = `articles/${userId}/${timestamp}_${safeTitle}.md`;
