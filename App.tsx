@@ -215,11 +215,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {status === AppStatus.IDLE && (
-              <a href="https://324893.xyz" target="_blank" className="text-slate-400 hover:text-slate-900 transition-colors">
-                <Globe className="w-4 h-4" />
-              </a>
-            )}
+            {/* 这里的地球仪图标已移除，移动到底部 */}
           </div>
         </div>
       </header>
@@ -228,9 +224,8 @@ const App: React.FC = () => {
         {status === AppStatus.IDLE ? (
           <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
             <div className="text-center space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold tracking-wide uppercase font-['Inter']">
-                <Zap className="w-3 h-3 fill-slate-700" /> Powered by Gemini
-              </div>
+              {/* 这里的 Powered by Gemini 徽标已移除，移动到底部 */}
+
               <h2 className="text-4xl font-black text-slate-900 tracking-tight sm:text-6xl font-['Playfair_Display']">
                 Turn Subtitles into <br/>
                 <span className="text-slate-500 italic">Beautiful Articles</span>
@@ -302,7 +297,6 @@ const App: React.FC = () => {
           </div>
         ) : (
           <div className="animate-in slide-in-from-bottom-4 duration-700">
-            {/* 文章容器：模仿报纸风格，去除过重的圆角和阴影，使用白色背景 */}
             <div className={`bg-white min-h-[80vh] relative p-8 md:p-16 lg:px-24 border border-slate-100 shadow-sm ${status === AppStatus.ERROR && !outputText ? 'bg-red-50/10' : ''}`}>
               <div>
                 {status === AppStatus.ERROR && !outputText ? (
@@ -341,7 +335,6 @@ const App: React.FC = () => {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-32 gap-8 opacity-50">
-                         {/* Loading State Placeholder */}
                          <div className="w-16 h-1 bg-slate-200 rounded-full animate-pulse"></div>
                          <div className="space-y-4 w-full max-w-md text-center">
                             <p className="font-['Playfair_Display'] text-2xl text-slate-400 italic">
@@ -360,15 +353,23 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-8 px-6 border-t border-slate-200 mt-auto bg-white font-['Inter']">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-[11px] text-slate-400 font-medium tracking-wider uppercase">
-             <div className="flex items-center gap-4">
-               <span className="font-bold text-slate-500">Sub2Article AI</span>
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+             {/* 左侧：Logo 和 地球仪链接 */}
+             <div className="flex items-center gap-4 text-sm text-slate-500">
+               <span className="font-bold text-slate-900">Sub2Article AI</span>
                <span className="w-px h-3 bg-slate-300"></span>
-               <span>Gemini 2.0 Flash</span>
+               <a href="https://324893.xyz" target="_blank" className="flex items-center gap-2 hover:text-indigo-600 transition-colors">
+                  <Globe className="w-4 h-4" />
+                  <span className="hidden sm:inline">324893.xyz</span>
+               </a>
              </div>
-             <p className="flex items-center gap-2">
-               © 2025 · Designed for Readers
-             </p>
+
+             {/* 右侧：Powered by Gemini 徽标 */}
+             <div className="flex items-center gap-4">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold tracking-wide uppercase">
+                  <Zap className="w-3 h-3 fill-slate-700" /> Powered by Gemini
+                </div>
+             </div>
           </div>
       </footer>
     </div>
