@@ -1,30 +1,38 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sub2Article AI - 智能字幕转文章</title>
-    <!-- Favicon using a clean Sparkles SVG icon matching the new logo -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z'/><path d='M5 3v4'/><path d='M19 17v4'/><path d='M3 5h4'/><path d='M17 19h4'/></svg>">
+    
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@400;700;900&family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
+    
     <style>
-        body {
-            font-family: 'Inter', 'Noto+Sans+SC', sans-serif;
-            background-color: #fcfcfd;
-            color: #1e293b;
+        /* 定义字体变量供 Tailwind 使用 */
+        :root {
+            --font-ui: 'Inter', sans-serif;
+            --font-heading: 'Playfair Display', serif;
+            --font-body: 'Merriweather', serif;
         }
+
+        body {
+            font-family: var(--font-ui);
+            background-color: #f9f9f9; /* 稍微调亮背景，更像纸张环境 */
+            color: #1a1a1a;
+        }
+        
+        .font-heading { font-family: var(--font-heading); }
+        .font-body { font-family: var(--font-body); }
+
         .gradient-bg {
             background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
         }
-        .glass-effect {
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-        }
+        
         @keyframes float {
             0% { transform: translateY(0px); }
             50% { transform: translateY(-10px); }
@@ -33,25 +41,13 @@
         .animate-float {
             animation: float 3s ease-in-out infinite;
         }
-        /* Custom scrollbar for better aesthetics */
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #e2e8f0;
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #cbd5e1;
-        }
-        /* Prose customization */
-        .prose h1 { font-weight: 800; letter-spacing: -0.025em; color: #0f172a; margin-bottom: 1.5rem; }
-        .prose p { line-height: 1.75; margin-bottom: 1.25rem; color: #334155; }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
     </style>
-    <!-- 注入 process shim 兼容浏览器环境 -->
     <script>
       window.process = window.process || { env: {} };
     </script>
