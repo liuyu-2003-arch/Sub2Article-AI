@@ -16,6 +16,7 @@ import {
   Save,
   Share2,
   Plus,
+  File,
   Calendar,
   LayoutGrid
 } from 'lucide-react';
@@ -35,10 +36,8 @@ const App: React.FC = () => {
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
 
-  // 视图控制: 'list' | 'create'
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
 
-  // R2 相关状态
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [historyList, setHistoryList] = useState<any[]>([]);
@@ -48,10 +47,8 @@ const App: React.FC = () => {
   const outputEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // 1. 初始加载列表
     loadHistory();
 
-    // 2. 检查 URL ID
     const checkUrlForArticle = async () => {
       const params = new URLSearchParams(window.location.search);
       const articleId = params.get('id');
@@ -64,14 +61,13 @@ const App: React.FC = () => {
           if (content) {
             setOutputText(content);
             setCurrentArticleKey(articleId);
-            
-            // 解析文件名用于显示
-            // 格式: articles/user/timestamp_Title.md
-            // 逻辑: 取文件名 -> 去掉.md -> 按_分割 -> 取第2部分及以后 -> 拼回字符串
+
+            // 解析 URL 中的标题
             const rawName = articleId.split('/').pop() || '';
+            // 逻辑：去掉.md -> 去掉时间戳部分 -> 将下划线替换回空格
             const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Shared Article';
             setFileName(simpleName);
-            
+
             setStatus(AppStatus.SUCCESS);
             setProcessStatus("加载完成");
             window.scrollTo(0, 0);
@@ -139,8 +135,9 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    let nameClean = file.name.replace(/\.[^.]+$/, ""); 
+    let nameClean = file.name.replace(/\.[^.]+$/, "");
     nameClean = nameClean.replace(/\.(en|zh|zh-CN|us|uk|jp|kr)$/i, "");
+
     setFileName(nameClean);
 
     const reader = new FileReader();
@@ -153,7 +150,7 @@ const App: React.FC = () => {
 
   const handleProcess = async () => {
     if (!inputText.trim()) return;
-    
+
     const initialText = fileName ? `# ${fileName}\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
@@ -162,19 +159,19 @@ const App: React.FC = () => {
     setSaveSuccess(false);
     setCurrentArticleKey(null);
     updateUrlWithId(null);
-    
+
     try {
       let currentFullText = initialText;
       let isFullyComplete = false;
       let loopCount = 0;
-      const MAX_LOOPS = 15; 
+      const MAX_LOOPS = 15;
 
       let stream = processSubtitleToArticleStream(inputText, fileName || '');
-      
+
       while (!isFullyComplete && loopCount < MAX_LOOPS) {
         loopCount++;
         let hasReceivedChunk = false;
-        
+
         for await (const chunk of stream) {
           if (!hasReceivedChunk && chunk.text) {
              hasReceivedChunk = true;
@@ -182,7 +179,7 @@ const App: React.FC = () => {
           }
           currentFullText += chunk.text;
           setOutputText(currentFullText);
-          
+
           isFullyComplete = chunk.isComplete;
         }
 
@@ -196,7 +193,7 @@ const App: React.FC = () => {
            stream = continueProcessingStream(inputText, currentFullText);
         }
       }
-      
+
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("整理完成");
     } catch (err: any) {
@@ -206,33 +203,31 @@ const App: React.FC = () => {
     }
   };
 
-  // === 核心修复：正确传递标题给 uploadToR2 ===
   const handleSaveToCloud = async () => {
     if (!outputText) return;
     setIsSaving(true);
     try {
-      // 1. 尝试从正文 H1 获取标题
+      // 1. 提取标题
       const titleMatch = outputText.match(/^#+\s+(.*)/m);
-      // 2. 如果没有 H1，使用文件名
       let title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
-      
-      // 去除标题中的 Markdown 标记 (如加粗 **text**)
+      // 去除 Markdown 符号
       title = title.replace(/[*_~`]/g, '');
 
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
       if (!localStorage.getItem('sub2article_user_id')) {
           localStorage.setItem('sub2article_user_id', userId);
       }
-      
-      // 调用更新后的 uploadToR2 (content, title, userId)
+
+      // 2. 上传
       const savedKey = await uploadToR2(outputText, title, userId);
-      
+
       setCurrentArticleKey(savedKey);
       updateUrlWithId(savedKey);
       setSaveSuccess(true);
-      
+
+      // 3. 刷新列表
       loadHistory();
-      
+
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (e) {
       console.error(e);
@@ -246,16 +241,16 @@ const App: React.FC = () => {
     try {
       setStatus(AppStatus.LOADING);
       setProcessStatus("正在加载文章...");
-      
+
       const content = await getArticleContent(key);
       setOutputText(content);
       setCurrentArticleKey(key);
       updateUrlWithId(key);
-      
+
       const rawName = key.split('/').pop() || '';
       const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Article';
       setFileName(simpleName);
-      
+
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("加载完成");
       window.scrollTo(0, 0);
@@ -280,14 +275,14 @@ const App: React.FC = () => {
 
   const handleDeleteArticle = async (e: React.MouseEvent, key: string) => {
     e.stopPropagation();
-    if (confirm("确定要删除这篇文章吗？如果删除，分享的链接也将失效。")) {
+    if (confirm("确定要删除这篇文章吗？")) {
       await deleteArticle(key);
       if (key === currentArticleKey) {
         updateUrlWithId(null);
         setCurrentArticleKey(null);
-        reset(); 
+        reset();
       }
-      loadHistory(); 
+      loadHistory();
     }
   };
 
@@ -334,24 +329,24 @@ const App: React.FC = () => {
               </span>
             </button>
           </div>
-          
+
           <div className="flex items-center gap-3">
              {viewMode === 'list' && status === AppStatus.IDLE && (
-                <button 
+                <button
                   onClick={goCreate}
                   className="bg-slate-900 text-white hover:bg-slate-800 px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 font-['Inter'] shadow-sm"
                 >
-                  <Plus className="w-4 h-4" /> 
+                  <Plus className="w-4 h-4" />
                   <span className="hidden sm:inline">添加文章</span>
                 </button>
              )}
-             
+
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
                 {outputText && (
                   <>
                     {currentArticleKey && (
-                      <button 
+                      <button
                         onClick={handleShare}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
                       >
@@ -361,7 +356,7 @@ const App: React.FC = () => {
                     )}
 
                     {!currentArticleKey && (
-                      <button 
+                      <button
                         onClick={handleSaveToCloud}
                         disabled={isSaving || saveSuccess}
                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter'] ${saveSuccess ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
@@ -377,7 +372,7 @@ const App: React.FC = () => {
                       </button>
                     )}
 
-                    <button 
+                    <button
                       onClick={copyForNotion}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
                     >
@@ -389,12 +384,12 @@ const App: React.FC = () => {
 
                 <div className="h-4 w-px bg-slate-200 mx-1" />
 
-                <button 
+                <button
                   onClick={reset}
                   className="text-slate-400 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 font-['Inter']"
                   title="返回列表"
                 >
-                  <ArrowRight className="w-3.5 h-3.5 rotate-180" /> 
+                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
                   <span className="hidden sm:inline">返回列表</span>
                 </button>
               </div>
@@ -433,10 +428,22 @@ const App: React.FC = () => {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {historyList.map((item) => {
-                        // 列表显示逻辑：从文件名反解标题
+                        // === 修复列表标题显示 ===
+                        // 尝试从文件名解析: timestamp_Title.md
+                        // 先去掉 .md，再用 split('_')
                         const rawName = item.Key.split('/').pop() || '';
-                        // 假设格式为 timestamp_Title.md，用 split('_') 分割，取后半部分
-                        const displayName = rawName.replace('.md', '').split('_').slice(1).join(' ') || '无标题文章';
+                        // 如果文件名中包含下划线（我们替换的空格），在这里尝试还原空格显示
+                        // split('_') 会把标题也切开，所以这里取 slice(1) 然后 join(' ')
+                        // 例如: 2026-01-12_Title_Part1_Part2 -> Title Part1 Part2
+                        let displayName = '无标题文章';
+                        const parts = rawName.replace('.md', '').split('_');
+                        if (parts.length > 1) {
+                            displayName = parts.slice(1).join(' ');
+                        } else if (parts.length === 1 && parts[0] !== '') {
+                            // 兼容旧文件（可能只有时间戳）
+                            displayName = parts[0];
+                        }
+
                         const date = new Date(item.LastModified).toLocaleDateString();
                         
                         return (

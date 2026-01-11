@@ -1,10 +1,10 @@
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-// R2 配置 (保持您原来的配置)
-const R2_ENDPOINT = "https://dd0afffd8fff1c8846db83bc10e2aa1f.r2.cloudflarestorage.com";
-const BUCKET_NAME = "cloud-r2";
-const ACCESS_KEY_ID = "Xb-WOGu9jnwkkdJHRXR4X7V-JOI3WYtGRzVB6Tkh";
-const SECRET_ACCESS_KEY = "8ae30d692bbacb4b63a486a3c481d7433b3a7d126b69cbf5c61819260e387ef9";
+// R2 Configuration (保持您的配置不变)
+const R2_ENDPOINT = "hhttps://dd0afffd8fff1c8846db83bc10e2aa1f.r2.cloudflarestorage.com";
+const BUCKET_NAME = "sub2article";
+const ACCESS_KEY_ID = "566ba62b3c26a6a81ba2246147c2dd29";
+const SECRET_ACCESS_KEY = "47ec9b42d6cab98c454287313ea075df91512fad62c639fa0fb809be970085c4";
 
 const s3Client = new S3Client({
   region: "auto",
@@ -25,12 +25,18 @@ const s3Client = new S3Client({
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // === 关键修复：强力过滤文件名 ===
-  // 1. [^\w\u4e00-\u9fa5-] 匹配所有非(字母/数字/下划线/汉字/连字符)的字符
-  // 2. 将这些字符（包括空格、问号、标点）全部替换为 "_"
-  const safeTitle = title.replace(/[^\w\u4e00-\u9fa5-]/g, "_").substring(0, 50);
+  // === 1. 强力过滤文件名 ===
+  // 只保留字母、数字、中文、下划线、连字符。将空格、问号等其他符号全部替换为 "_"
+  let safeTitle = title.replace(/[^\w\u4e00-\u9fa5-]/g, "_");
 
-  // 最终文件名类似: articles/default_user/2026-01-12_What_is_the_secret_.md
+  // === 2. 避免连续下划线 ===
+  safeTitle = safeTitle.replace(/_+/g, "_");
+
+  // === 3. 限制长度 ===
+  // 防止文件名过长导致错误，只取前 50 个字符
+  safeTitle = safeTitle.substring(0, 50);
+
+  // 文件名格式: articles/userId/时间戳_标题.md
   const fileName = `articles/${userId}/${timestamp}_${safeTitle}.md`;
 
   const command = new PutObjectCommand({
@@ -38,10 +44,7 @@ export async function uploadToR2(content: string, title: string, userId: string)
     Key: fileName,
     Body: content,
     ContentType: "text/markdown; charset=utf-8",
-    // 将原始标题存入 Metadata，方便以后可能的展示（注意要 encode）
-    Metadata: {
-        "x-amz-meta-title": encodeURIComponent(title)
-    }
+    // === 关键修复：移除 Metadata，避免 400 Bad Request ===
   });
 
   try {
@@ -66,6 +69,7 @@ export async function listArticles(userId: string) {
 
   try {
     const response = await s3Client.send(command);
+    // 按时间倒序排列
     return (response.Contents || []).sort((a, b) =>
         (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0)
     );
