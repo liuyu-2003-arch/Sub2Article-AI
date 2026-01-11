@@ -11,13 +11,10 @@ import {
   FileText,
   Trash2,
   Copy,
-  ChevronRight,
-  ArrowRight,
-  PlayCircle,
   Loader2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
+import { processSubtitleToArticleStream, continueProcessingStream, StreamUpdate } from './services/geminiService';
 import { AppStatus } from './types';
 
 const App: React.FC = () => {
@@ -28,10 +25,32 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
   const [processStatus, setProcessStatus] = useState<string>('');
-  const [isStreamFinished, setIsStreamFinished] = useState<boolean>(false);
+  // 恢复进度百分比状态
+  const [progress, setProgress] = useState<number>(0);
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
+  // 模拟进度条逻辑：在 LOADING 状态下自动增加，直到 98%
+  useEffect(() => {
+    let interval: number;
+    if (status === AppStatus.LOADING) {
+      setProgress(0);
+      interval = window.setInterval(() => {
+        setProgress(prev => {
+          // 稍微快一点，但卡在 98% 等待真正完成
+          if (prev < 60) return prev + Math.random() * 3;
+          if (prev < 90) return prev + Math.random() * 1;
+          if (prev < 98) return prev + 0.2;
+          return prev;
+        });
+      }, 500);
+    } else if (status === AppStatus.SUCCESS) {
+      setProgress(100);
+    }
+    return () => clearInterval(interval);
+  }, [status]);
+
+  // 自动滚动
   useEffect(() => {
     if (status === AppStatus.LOADING || status === AppStatus.SUCCESS) {
       outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -53,64 +72,54 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
+  // === 核心修改：自动续写循环 ===
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
     const initialText = fileName ? `# ${fileName}\n\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
-    setProcessStatus("连接 AI 中...");
-    setIsStreamFinished(false);
+    setProcessStatus("准备开始...");
     setError(null);
 
     try {
-      const stream = processSubtitleToArticleStream(inputText, fileName || '');
-      let fullText = initialText;
-      let hasReceivedFirstChunk = false;
+      // 1. 第一次生成
+      let currentFullText = initialText;
+      let isFullyComplete = false;
+      let stream = processSubtitleToArticleStream(inputText, fileName || '');
 
-      for await (const chunk of stream) {
-        if (!hasReceivedFirstChunk && chunk.text) {
-            hasReceivedFirstChunk = true;
-            setProcessStatus("正在生成...");
+      // 循环处理流
+      while (!isFullyComplete) {
+        let hasReceivedChunk = false;
+
+        // 读取当前流
+        for await (const chunk of stream) {
+          if (!hasReceivedChunk && chunk.text) {
+             hasReceivedChunk = true;
+             // 状态显示为：正在生成 45%
+             setProcessStatus("正在生成");
+          }
+          currentFullText += chunk.text;
+          setOutputText(currentFullText);
+
+          // 更新最后一块的完成状态
+          isFullyComplete = chunk.isComplete;
         }
-        fullText += chunk.text;
-        setOutputText(fullText);
-        if (chunk.isComplete) setIsStreamFinished(true);
+
+        // 如果循环结束但 isFullyComplete 仍为 false，说明触发了长度限制，需要自动续写
+        if (!isFullyComplete) {
+          setProcessStatus("内容较长，自动续写中"); // 给用户一个反馈
+          // 添加一点间隔，避免紧贴
+          currentFullText += "\n\n";
+          // 创建新的续写流，并进入下一次 while 循环
+          stream = continueProcessingStream(inputText, currentFullText);
+        }
       }
 
       setStatus(AppStatus.SUCCESS);
-      setProcessStatus("完成");
+      setProcessStatus("整理完成");
     } catch (err: any) {
       setError(err.message || "处理过程中发生错误，请稍后重试。");
-      setStatus(AppStatus.ERROR);
-    }
-  };
-
-  const handleContinue = async () => {
-    if (!inputText.trim() || !outputText) return;
-    const preText = outputText;
-    setStatus(AppStatus.LOADING);
-    setProcessStatus("正在续写...");
-    setError(null);
-
-    try {
-      const stream = continueProcessingStream(inputText, preText);
-      let fullText = preText + "\n\n";
-      let hasReceivedFirstChunk = false;
-
-      for await (const chunk of stream) {
-        if (!hasReceivedFirstChunk && chunk.text) {
-            hasReceivedFirstChunk = true;
-            setProcessStatus("正在生成...");
-        }
-        fullText += chunk.text;
-        setOutputText(fullText);
-        if (chunk.isComplete) setIsStreamFinished(true);
-      }
-      setStatus(AppStatus.SUCCESS);
-      setProcessStatus("完成");
-    } catch (err: any) {
-      setError("续写失败: " + (err.message || "请重试"));
       setStatus(AppStatus.ERROR);
     }
   };
@@ -121,7 +130,7 @@ const App: React.FC = () => {
     setFileName('');
     setError(null);
     setProcessStatus('');
-    setIsStreamFinished(false);
+    setProgress(0);
   };
 
   const copyForNotion = () => {
@@ -146,10 +155,8 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
-      {/* 顶部固定 Header */}
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-100 py-3 px-4 md:px-6 sticky top-0 z-50 transition-all">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
-          {/* Logo 区域 */}
           <div className="flex items-center gap-4">
             <a href="/" className="flex items-center gap-2 group">
               <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-1.5 rounded-lg shadow-md shadow-indigo-100 group-hover:scale-105 transition-all duration-300">
@@ -161,25 +168,24 @@ const App: React.FC = () => {
             </a>
           </div>
 
-          {/* 右侧控制区：包含进度、按钮等 */}
           <div className="flex items-center gap-3">
-            {/* 仅在非 IDLE 状态显示操作按钮 */}
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
 
-                {/* 状态文字显示 */}
+                {/* 状态文字 + 百分比显示 */}
                 <div className="hidden md:flex items-center gap-2 mr-2 px-3 py-1.5 bg-slate-50 rounded-full border border-slate-100">
                   {status === AppStatus.LOADING ? (
                     <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
                   ) : (
                     <Check className="w-3.5 h-3.5 text-emerald-500" />
                   )}
-                  <span className="text-xs font-semibold text-slate-600">
-                    {processStatus}
+                  <span className="text-xs font-semibold text-slate-600 tabular-nums">
+                    {status === AppStatus.LOADING
+                      ? `${processStatus} ${Math.floor(progress)}%`
+                      : processStatus}
                   </span>
                 </div>
 
-                {/* 复制按钮 */}
                 {outputText && (
                   <>
                     <button
@@ -200,10 +206,8 @@ const App: React.FC = () => {
                   </>
                 )}
 
-                {/* 分隔线 */}
                 <div className="h-4 w-px bg-slate-200 mx-1" />
 
-                {/* 重新开始按钮 */}
                 <button
                   onClick={reset}
                   className="text-slate-400 hover:text-red-500 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5"
@@ -215,7 +219,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* 外部链接 (在 IDLE 状态下显示，处理中隐藏以节省空间) */}
             {status === AppStatus.IDLE && (
               <a href="https://324893.xyz" target="_blank" className="text-slate-400 hover:text-indigo-600 transition-colors">
                 <Globe className="w-4 h-4" />
@@ -227,7 +230,6 @@ const App: React.FC = () => {
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 flex flex-col justify-start">
         {status === AppStatus.IDLE ? (
-          // === IDLE 状态的 UI (上传界面) ===
           <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
             <div className="text-center space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold tracking-wide uppercase">
@@ -303,10 +305,7 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
-          // === 处理中 / 完成后的 UI (文章展示) ===
           <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-700">
-            {/* 这里的旧工具栏代码已移除，现在控制都在 Header */}
-
             <div className={`bg-white rounded-[2.5rem] shadow-2xl shadow-indigo-100/20 border border-slate-100 min-h-[60vh] relative ${status === AppStatus.ERROR && !outputText ? 'border-red-200 bg-red-50/10' : ''}`}>
               <div className="p-8 md:p-14 lg:p-20">
                 {status === AppStatus.ERROR && !outputText ? (
@@ -328,32 +327,12 @@ const App: React.FC = () => {
                         {status === AppStatus.LOADING && (
                           <div className="inline-flex items-center mt-6">
                             <span className="inline-block w-2 h-6 bg-indigo-500 animate-pulse align-middle" />
-                            <span className="ml-3 text-indigo-400 text-xs font-bold animate-pulse">{processStatus}</span>
+                            <span className="ml-3 text-indigo-400 text-xs font-bold animate-pulse tabular-nums">
+                              {processStatus} {Math.floor(progress)}%
+                            </span>
                           </div>
                         )}
-
-                        {/* 继续生成按钮 */}
-                        {status !== AppStatus.LOADING && !isStreamFinished && (
-                          <div className="mt-12 pt-8 border-t border-dashed border-slate-200 flex justify-center">
-                            <button
-                              onClick={handleContinue}
-                              className="group flex items-center gap-2 px-6 py-3 bg-white border-2 border-indigo-100 text-indigo-600 rounded-full font-bold hover:bg-indigo-50 hover:border-indigo-200 hover:scale-105 transition-all shadow-sm"
-                            >
-                              <PlayCircle className="w-5 h-5" />
-                              文章似乎未完？点击继续生成
-                              <ChevronRight className="w-4 h-4 text-indigo-400 group-hover:translate-x-1 transition-transform" />
-                            </button>
-                          </div>
-                        )}
-
-                        {/* 结束标记 */}
-                        {isStreamFinished && (
-                           <div className="mt-12 py-4 flex justify-center text-slate-300">
-                             <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
-                             <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
-                             <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
-                           </div>
-                        )}
+                        {/* 已经移除了底部的三个点和手动继续按钮 */}
                       </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-24 gap-10">
@@ -365,8 +344,8 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="space-y-4 w-full max-w-sm text-center">
-                            <p className="text-slate-800 font-extrabold text-xl animate-pulse">
-                              {processStatus}
+                            <p className="text-slate-800 font-extrabold text-xl animate-pulse tabular-nums">
+                              {processStatus} {Math.floor(progress)}%
                             </p>
                             <div className="flex items-center justify-center gap-1">
                               <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
