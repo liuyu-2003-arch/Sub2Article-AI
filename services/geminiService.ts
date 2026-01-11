@@ -41,6 +41,7 @@ const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成�
 
 【输入数据】：`;
 
+// === 关键点：必须导出这个接口 ===
 export interface StreamUpdate {
   text: string;
   isComplete: boolean;
@@ -50,11 +51,14 @@ export interface StreamUpdate {
  * 处理字幕的主函数
  */
 export async function* processSubtitleToArticleStream(text: string, title: string = ''): AsyncGenerator<StreamUpdate> {
+  // 确保 API KEY 存在
+  if (!process.env.API_KEY) {
+    throw new Error("Missing API Key");
+  }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   let finalPrompt = BASE_PROMPT;
   if (title) {
-    // === 修改核心逻辑：明确要求输出翻译结果，而不是拼接字符串 ===
     finalPrompt += `\n
 【关于标题处理】：
 系统已自动生成了英文主标题（H1）："${title}"
@@ -98,6 +102,9 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
  * 续写处理函数
  */
 export async function* continueProcessingStream(originalText: string, currentOutput: string): AsyncGenerator<StreamUpdate> {
+  if (!process.env.API_KEY) {
+    throw new Error("Missing API Key");
+  }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const lastPart = currentOutput.slice(-800);
 

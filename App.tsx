@@ -14,7 +14,8 @@ import {
   Loader2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { processSubtitleToArticleStream, continueProcessingStream, StreamUpdate } from './services/geminiService';
+// 确保这里引入没报错，如果有波浪线说明 geminiService.ts 没更新对
+import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
 import { AppStatus } from './types';
 
 const App: React.FC = () => {
@@ -25,22 +26,20 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
   const [processStatus, setProcessStatus] = useState<string>('');
-  // 恢复进度百分比状态
   const [progress, setProgress] = useState<number>(0);
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  // 模拟进度条逻辑：在 LOADING 状态下自动增加，直到 98%
+  // 进度条模拟
   useEffect(() => {
     let interval: number;
     if (status === AppStatus.LOADING) {
       setProgress(0);
       interval = window.setInterval(() => {
         setProgress(prev => {
-          // 稍微快一点，但卡在 98% 等待真正完成
           if (prev < 60) return prev + Math.random() * 3;
           if (prev < 90) return prev + Math.random() * 1;
-          if (prev < 98) return prev + 0.2;
+          if (prev < 99) return prev + 0.1;
           return prev;
         });
       }, 500);
@@ -67,12 +66,11 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      setInputText(content);
+      setInputText(content || "");
     };
     reader.readAsText(file);
   };
 
-  // === 核心修改：自动续写循环 ===
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
@@ -83,42 +81,43 @@ const App: React.FC = () => {
     setError(null);
 
     try {
-      // 1. 第一次生成
       let currentFullText = initialText;
       let isFullyComplete = false;
+      let loopCount = 0;
+      const MAX_LOOPS = 15; // === 安全中断：防止死循环导致网页崩溃 ===
+
       let stream = processSubtitleToArticleStream(inputText, fileName || '');
 
-      // 循环处理流
-      while (!isFullyComplete) {
+      while (!isFullyComplete && loopCount < MAX_LOOPS) {
+        loopCount++;
         let hasReceivedChunk = false;
 
-        // 读取当前流
         for await (const chunk of stream) {
           if (!hasReceivedChunk && chunk.text) {
              hasReceivedChunk = true;
-             // 状态显示为：正在生成 45%
              setProcessStatus("正在生成");
           }
           currentFullText += chunk.text;
           setOutputText(currentFullText);
 
-          // 更新最后一块的完成状态
           isFullyComplete = chunk.isComplete;
         }
 
-        // 如果循环结束但 isFullyComplete 仍为 false，说明触发了长度限制，需要自动续写
         if (!isFullyComplete) {
-          setProcessStatus("内容较长，自动续写中"); // 给用户一个反馈
-          // 添加一点间隔，避免紧贴
-          currentFullText += "\n\n";
-          // 创建新的续写流，并进入下一次 while 循环
-          stream = continueProcessingStream(inputText, currentFullText);
+           if (loopCount >= MAX_LOOPS) {
+             console.warn("达到最大续写次数，强制停止");
+             break;
+           }
+           setProcessStatus("内容较长，自动续写中");
+           currentFullText += "\n\n";
+           stream = continueProcessingStream(inputText, currentFullText);
         }
       }
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("整理完成");
     } catch (err: any) {
+      console.error(err);
       setError(err.message || "处理过程中发生错误，请稍后重试。");
       setStatus(AppStatus.ERROR);
     }
@@ -332,7 +331,6 @@ const App: React.FC = () => {
                             </span>
                           </div>
                         )}
-                        {/* 已经移除了底部的三个点和手动继续按钮 */}
                       </div>
                     ) : (
                       <div className="flex flex-col items-center justify-center py-24 gap-10">
