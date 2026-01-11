@@ -14,7 +14,7 @@ import {
   ChevronRight,
   ArrowRight,
   PlayCircle,
-  Loader2 // 新增 Loader 图标
+  Loader2
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
@@ -27,15 +27,11 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
-
-  // 新增：具体的进度状态文字
   const [processStatus, setProcessStatus] = useState<string>('');
-  // 新增：文章是否真正完成的标记
   const [isStreamFinished, setIsStreamFinished] = useState<boolean>(false);
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  // 自动滚动
   useEffect(() => {
     if (status === AppStatus.LOADING || status === AppStatus.SUCCESS) {
       outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -60,38 +56,30 @@ const App: React.FC = () => {
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
-    // 初始化状态
     const initialText = fileName ? `# ${fileName}\n\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
-    setProcessStatus("正在连接 AI 服务..."); // 初始状态
-    setIsStreamFinished(false); // 重置完成状态
+    setProcessStatus("连接 AI 中...");
+    setIsStreamFinished(false);
     setError(null);
 
     try {
       const stream = processSubtitleToArticleStream(inputText, fileName || '');
-
       let fullText = initialText;
       let hasReceivedFirstChunk = false;
 
       for await (const chunk of stream) {
-        // 收到第一个块时更新状态
         if (!hasReceivedFirstChunk && chunk.text) {
             hasReceivedFirstChunk = true;
-            setProcessStatus("正在智能重组与翻译...");
+            setProcessStatus("正在生成...");
         }
-
         fullText += chunk.text;
         setOutputText(fullText);
-
-        // 实时检查是否完成
-        if (chunk.isComplete) {
-            setIsStreamFinished(true);
-        }
+        if (chunk.isComplete) setIsStreamFinished(true);
       }
 
       setStatus(AppStatus.SUCCESS);
-      setProcessStatus("整理完成");
+      setProcessStatus("完成");
     } catch (err: any) {
       setError(err.message || "处理过程中发生错误，请稍后重试。");
       setStatus(AppStatus.ERROR);
@@ -100,35 +88,27 @@ const App: React.FC = () => {
 
   const handleContinue = async () => {
     if (!inputText.trim() || !outputText) return;
-
     const preText = outputText;
-    setStatus(AppStatus.LOADING); // 重新进入 Loading 状态
-    setProcessStatus("正在衔接上下文..."); // 更新状态文字
+    setStatus(AppStatus.LOADING);
+    setProcessStatus("正在续写...");
     setError(null);
 
     try {
       const stream = continueProcessingStream(inputText, preText);
-      let fullText = preText;
-      fullText += "\n\n";
-
+      let fullText = preText + "\n\n";
       let hasReceivedFirstChunk = false;
 
       for await (const chunk of stream) {
         if (!hasReceivedFirstChunk && chunk.text) {
             hasReceivedFirstChunk = true;
-            setProcessStatus("正在继续生成...");
+            setProcessStatus("正在生成...");
         }
-
         fullText += chunk.text;
         setOutputText(fullText);
-
-        if (chunk.isComplete) {
-            setIsStreamFinished(true);
-        }
+        if (chunk.isComplete) setIsStreamFinished(true);
       }
-
       setStatus(AppStatus.SUCCESS);
-      setProcessStatus("整理完成");
+      setProcessStatus("完成");
     } catch (err: any) {
       setError("续写失败: " + (err.message || "请重试"));
       setStatus(AppStatus.ERROR);
@@ -155,11 +135,9 @@ const App: React.FC = () => {
     const element = document.createElement("a");
     const file = new Blob([outputText], {type: 'text/markdown'});
     element.href = URL.createObjectURL(file);
-
     const titleMatch = outputText.match(/^#+\s+(.*)/m);
     let downloadName = titleMatch ? titleMatch[1].trim() : (fileName || "整理后的文章");
     downloadName = downloadName.replace(/[\\/:*?"<>|]/g, "").substring(0, 100);
-
     element.download = `${downloadName}.md`;
     document.body.appendChild(element);
     element.click();
@@ -168,41 +146,89 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-indigo-100 selection:text-indigo-900">
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-100 py-4 px-6 sticky top-0 z-50 transition-all">
+      {/* 顶部固定 Header */}
+      <header className="bg-white/90 backdrop-blur-md border-b border-slate-100 py-3 px-4 md:px-6 sticky top-0 z-50 transition-all">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
+          {/* Logo 区域 */}
           <div className="flex items-center gap-4">
-            <a href="/" className="flex items-center gap-2.5 group">
-              <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-2 rounded-xl shadow-lg shadow-indigo-100 group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
-                <Sparkles className="w-5 h-5 text-white" />
+            <a href="/" className="flex items-center gap-2 group">
+              <div className="bg-gradient-to-br from-indigo-500 to-violet-600 p-1.5 rounded-lg shadow-md shadow-indigo-100 group-hover:scale-105 transition-all duration-300">
+                <Sparkles className="w-4 h-4 text-white" />
               </div>
-              <span className="text-xl font-bold text-slate-900 tracking-tight">
+              <span className="text-lg font-bold text-slate-900 tracking-tight hidden sm:inline">
                 Sub2Article <span className="text-indigo-600">AI</span>
               </span>
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
+          {/* 右侧控制区：包含进度、按钮等 */}
+          <div className="flex items-center gap-3">
+            {/* 仅在非 IDLE 状态显示操作按钮 */}
             {status !== AppStatus.IDLE && (
-              <button
-                onClick={reset}
-                className="text-slate-400 hover:text-red-500 transition-colors text-xs font-semibold flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> 重新开始
-              </button>
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
+
+                {/* 状态文字显示 */}
+                <div className="hidden md:flex items-center gap-2 mr-2 px-3 py-1.5 bg-slate-50 rounded-full border border-slate-100">
+                  {status === AppStatus.LOADING ? (
+                    <Loader2 className="w-3.5 h-3.5 text-indigo-500 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  )}
+                  <span className="text-xs font-semibold text-slate-600">
+                    {processStatus}
+                  </span>
+                </div>
+
+                {/* 复制按钮 */}
+                {outputText && (
+                  <>
+                    <button
+                      onClick={copyForNotion}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all text-xs font-bold border border-transparent hover:border-indigo-100"
+                    >
+                      {notionCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      {notionCopied ? '已复制' : '复制'}
+                    </button>
+
+                    <button
+                      onClick={downloadResult}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all text-xs font-bold border border-transparent hover:border-indigo-100"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      下载
+                    </button>
+                  </>
+                )}
+
+                {/* 分隔线 */}
+                <div className="h-4 w-px bg-slate-200 mx-1" />
+
+                {/* 重新开始按钮 */}
+                <button
+                  onClick={reset}
+                  className="text-slate-400 hover:text-red-500 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5"
+                  title="重新开始"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">重新开始</span>
+                </button>
+              </div>
             )}
-            <div className="h-4 w-px bg-slate-100 hidden sm:block" />
-            <a href="https://324893.xyz" target="_blank" className="text-slate-400 hover:text-indigo-600 transition-colors hidden sm:block">
-              <Globe className="w-4 h-4" />
-            </a>
+
+            {/* 外部链接 (在 IDLE 状态下显示，处理中隐藏以节省空间) */}
+            {status === AppStatus.IDLE && (
+              <a href="https://324893.xyz" target="_blank" className="text-slate-400 hover:text-indigo-600 transition-colors">
+                <Globe className="w-4 h-4" />
+              </a>
+            )}
           </div>
         </div>
-
-        {/* 这里移除了旧的顶部假进度条，改为在内容区域显示真实状态 */}
       </header>
 
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 md:py-12 flex flex-col justify-start">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 flex flex-col justify-start">
         {status === AppStatus.IDLE ? (
-          <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700">
+          // === IDLE 状态的 UI (上传界面) ===
+          <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
             <div className="text-center space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold tracking-wide uppercase">
                 <Zap className="w-3 h-3 fill-indigo-600" /> Powered by Gemini
@@ -260,7 +286,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Feature grid omitted for brevity, same as before */}
              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-4">
               {[
                 { title: '智能分段', desc: '根据语义自动划分自然段落', icon: Brain },
@@ -278,45 +303,9 @@ const App: React.FC = () => {
             </div>
           </div>
         ) : (
+          // === 处理中 / 完成后的 UI (文章展示) ===
           <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-700">
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white/50 backdrop-blur-sm p-3 rounded-2xl border border-slate-100/50">
-              <div className="flex items-center gap-3 px-2">
-                {/* 状态指示器：根据是否完成显示不同图标和文字 */}
-                {status === AppStatus.LOADING ? (
-                   <div className="flex items-center gap-3">
-                     <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center">
-                       <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-                     </div>
-                     <div className="flex flex-col">
-                       <h2 className="text-sm font-bold text-slate-800">正在处理中</h2>
-                       <span className="text-[10px] font-medium text-indigo-500 animate-pulse">{processStatus}</span>
-                     </div>
-                   </div>
-                ) : (
-                   <div className="flex items-center gap-3">
-                     <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                       <Check className="w-4 h-4" />
-                     </div>
-                     <div className="flex flex-col">
-                        <h2 className="text-sm font-bold text-slate-800">整理完成</h2>
-                        <span className="text-[10px] font-medium text-slate-400">已生成全部内容</span>
-                     </div>
-                   </div>
-                )}
-              </div>
-
-              {outputText && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={copyForNotion} className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all text-xs font-bold shadow-lg shadow-slate-200 group relative whitespace-nowrap">
-                    {notionCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-white" />}
-                    {notionCopied ? '已复制全文' : '复制全文'}
-                  </button>
-                  <button onClick={downloadResult} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-lg shadow-indigo-100 whitespace-nowrap">
-                    <Download className="w-3.5 h-3.5" /> 下载 Markdown
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* 这里的旧工具栏代码已移除，现在控制都在 Header */}
 
             <div className={`bg-white rounded-[2.5rem] shadow-2xl shadow-indigo-100/20 border border-slate-100 min-h-[60vh] relative ${status === AppStatus.ERROR && !outputText ? 'border-red-200 bg-red-50/10' : ''}`}>
               <div className="p-8 md:p-14 lg:p-20">
@@ -343,8 +332,7 @@ const App: React.FC = () => {
                           </div>
                         )}
 
-                        {/* === “继续生成”按钮逻辑 === */}
-                        {/* 只有在 非Loading 状态 且 尚未完全结束（isStreamFinished 为 false）时才显示 */}
+                        {/* 继续生成按钮 */}
                         {status !== AppStatus.LOADING && !isStreamFinished && (
                           <div className="mt-12 pt-8 border-t border-dashed border-slate-200 flex justify-center">
                             <button
@@ -358,7 +346,7 @@ const App: React.FC = () => {
                           </div>
                         )}
 
-                        {/* 如果已完成，显示一个小的结束标记 */}
+                        {/* 结束标记 */}
                         {isStreamFinished && (
                            <div className="mt-12 py-4 flex justify-center text-slate-300">
                              <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
@@ -398,7 +386,6 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-10 px-6 border-t border-slate-50 mt-auto bg-white/40">
-         {/* Footer content same as before */}
         <div className="max-w-4xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-[11px] text-slate-400 font-semibold tracking-wider uppercase">
              <div className="flex items-center gap-6">

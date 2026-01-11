@@ -1,6 +1,6 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
-// 基础 Prompt (保持不变)
+// 基础 Prompt
 const BASE_PROMPT = `附件是一个视频语音识别转成的文字，请分析其语言内容并按以下规则整理：
 
 1. **如果是英文（或中英双语）内容**：
@@ -41,7 +41,6 @@ const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成�
 
 【输入数据】：`;
 
-// 定义返回结构，包含文本和结束状态
 export interface StreamUpdate {
   text: string;
   isComplete: boolean;
@@ -55,13 +54,14 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
 
   let finalPrompt = BASE_PROMPT;
   if (title) {
+    // === 修改核心逻辑：明确要求输出翻译结果，而不是拼接字符串 ===
     finalPrompt += `\n
 【关于标题处理】：
 系统已自动生成了英文主标题（H1）："${title}"
 **你的任务是**：
-在输出正文之前，请立即输出该标题的**中文翻译**，并使用 **二级标题 (##)** 格式。
+将该英文标题翻译成中文，并直接作为 **二级标题 (##)** 输出在正文最开始。
 示例输出结构：
-## ${title} 的中文翻译
+## [这里直接输出中文翻译结果]
 
 [正文开始...]
 `;
@@ -84,10 +84,6 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
       const part = chunk as GenerateContentResponse;
       const textChunk = part.text || "";
       const finishReason = part.candidates?.[0]?.finishReason;
-
-      // 判断是否完成：如果有 finishReason 且不是 MAX_TOKENS，则认为已完成
-      // STOP = 正常结束
-      // MAX_TOKENS = 长度达到上限（未完成）
       const isComplete = finishReason === 'STOP';
 
       yield { text: textChunk, isComplete };
