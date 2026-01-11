@@ -15,10 +15,10 @@ import {
   ArrowRight,
   Save,
   Share2,
-  Plus,          // 新增：添加图标
+  Plus,
   File,
-  Calendar,      // 新增：日历图标
-  LayoutGrid     // 新增：网格图标
+  Calendar,
+  LayoutGrid
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
@@ -37,7 +37,6 @@ const App: React.FC = () => {
   const [progress, setProgress] = useState<number>(0);
 
   // === 视图控制 ===
-  // 'list' = 首页文章列表, 'create' = 上传/生成页面
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
 
   // R2 相关状态
@@ -51,10 +50,8 @@ const App: React.FC = () => {
 
   // 初始化：加载列表，检查 URL
   useEffect(() => {
-    // 1. 加载历史文章列表
     loadHistory();
 
-    // 2. 检查 URL 是否带有文章 ID
     const checkUrlForArticle = async () => {
       const params = new URLSearchParams(window.location.search);
       const articleId = params.get('id');
@@ -73,7 +70,9 @@ const App: React.FC = () => {
 
             setStatus(AppStatus.SUCCESS);
             setProcessStatus("加载完成");
-            // 加载成功后，视图逻辑上相当于进入了 create 模式的查看状态，或者保持 status=SUCCESS 覆盖 IDLE
+
+            // === 修复点：URL加载文章后，强制滚动到顶部 ===
+            window.scrollTo(0, 0);
           } else {
             throw new Error("未找到文章内容");
           }
@@ -115,8 +114,11 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [status]);
 
+  // === 修复点：滚动逻辑优化 ===
+  // 仅在 LOADING 状态（生成中）且有新内容时自动滚动到底部
+  // 移除对 SUCCESS 状态的监听，防止点击历史文章时跳到底部
   useEffect(() => {
-    if (status === AppStatus.LOADING || status === AppStatus.SUCCESS) {
+    if (status === AppStatus.LOADING) {
       outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [outputText, status]);
@@ -210,9 +212,6 @@ const App: React.FC = () => {
     if (!outputText) return;
     setIsSaving(true);
     try {
-      const titleMatch = outputText.match(/^#+\s+(.*)/m);
-      const title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
-
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
       if (!localStorage.getItem('sub2article_user_id')) {
           localStorage.setItem('sub2article_user_id', userId);
@@ -224,7 +223,6 @@ const App: React.FC = () => {
       updateUrlWithId(savedKey);
       setSaveSuccess(true);
 
-      // 保存成功后刷新一下列表
       loadHistory();
 
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -240,7 +238,6 @@ const App: React.FC = () => {
     try {
       setStatus(AppStatus.LOADING);
       setProcessStatus("正在加载文章...");
-      // 不再需要 setShowHistory(false)
 
       const content = await getArticleContent(key);
       setOutputText(content);
@@ -252,6 +249,10 @@ const App: React.FC = () => {
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("加载完成");
+
+      // === 修复点：点击列表加载文章后，强制滚动到顶部 ===
+      window.scrollTo(0, 0);
+
     } catch (e) {
       setError("加载文章失败");
       setStatus(AppStatus.ERROR);
@@ -277,17 +278,15 @@ const App: React.FC = () => {
       if (key === currentArticleKey) {
         updateUrlWithId(null);
         setCurrentArticleKey(null);
-        // 如果删除了当前看的，回到列表
         reset();
       }
       loadHistory();
     }
   };
 
-  // 重置回列表页 (点击 Logo 或 重新开始)
   const reset = () => {
     setStatus(AppStatus.IDLE);
-    setViewMode('list'); // 回到列表
+    setViewMode('list');
     setOutputText('');
     setFileName('');
     setError(null);
@@ -296,10 +295,9 @@ const App: React.FC = () => {
     setSaveSuccess(false);
     setCurrentArticleKey(null);
     updateUrlWithId(null);
-    loadHistory(); // 刷新列表
+    loadHistory();
   };
 
-  // 切换到创建页面
   const goCreate = () => {
       setStatus(AppStatus.IDLE);
       setViewMode('create');
@@ -313,19 +311,6 @@ const App: React.FC = () => {
       setNotionCopied(true);
       setTimeout(() => setNotionCopied(false), 2000);
     });
-  };
-
-  const downloadResult = () => {
-    const element = document.createElement("a");
-    const file = new Blob([outputText], {type: 'text/markdown'});
-    element.href = URL.createObjectURL(file);
-    const titleMatch = outputText.match(/^#+\s+(.*)/m);
-    let downloadName = titleMatch ? titleMatch[1].trim() : (fileName || "整理后的文章");
-    downloadName = downloadName.replace(/[\\/:*?"<>|]/g, "").substring(0, 100);
-    element.download = `${downloadName}.md`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
   };
 
   return (
@@ -344,7 +329,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-             {/* 仅在列表模式下显示“添加文章”按钮，或者始终显示 */}
              {viewMode === 'list' && status === AppStatus.IDLE && (
                 <button
                   onClick={goCreate}
@@ -358,18 +342,7 @@ const App: React.FC = () => {
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
 
-                <div className="hidden md:flex items-center gap-2 mr-2 px-3 py-1.5 bg-slate-50 rounded-full border border-slate-100">
-                  {status === AppStatus.LOADING ? (
-                    <Loader2 className="w-3.5 h-3.5 text-slate-600 animate-spin" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  )}
-                  <span className="text-xs font-semibold text-slate-600 tabular-nums font-['Inter']">
-                    {status === AppStatus.LOADING
-                      ? `${processStatus} ${Math.floor(progress)}%`
-                      : processStatus}
-                  </span>
-                </div>
+                {/* === 修改点：移除了这里的“状态提示条” === */}
 
                 {outputText && (
                   <>
@@ -384,22 +357,25 @@ const App: React.FC = () => {
                       </button>
                     )}
 
-                     {/* 保存按钮 */}
-                    <button
-                      onClick={handleSaveToCloud}
-                      disabled={isSaving || saveSuccess}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter'] ${saveSuccess ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
-                    >
-                      {isSaving ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : saveSuccess ? (
-                        <Check className="w-3.5 h-3.5" />
-                      ) : (
-                        <Save className="w-3.5 h-3.5" />
-                      )}
-                      {saveSuccess ? '已保存' : '保存'}
-                    </button>
+                     {/* === 修改点：保存按钮仅在未保存状态下显示 === */}
+                    {!currentArticleKey && (
+                      <button
+                        onClick={handleSaveToCloud}
+                        disabled={isSaving || saveSuccess}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter'] ${saveSuccess ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                      >
+                        {isSaving ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : saveSuccess ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : (
+                          <Save className="w-3.5 h-3.5" />
+                        )}
+                        {saveSuccess ? '已保存' : '保存'}
+                      </button>
+                    )}
 
+                    {/* 复制按钮保留 */}
                     <button
                       onClick={copyForNotion}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
@@ -408,13 +384,7 @@ const App: React.FC = () => {
                       {notionCopied ? '已复制' : '复制'}
                     </button>
 
-                    <button
-                      onClick={downloadResult}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      下载
-                    </button>
+                    {/* === 修改点：移除了下载按钮 === */}
                   </>
                 )}
 
@@ -437,7 +407,6 @@ const App: React.FC = () => {
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8 flex flex-col justify-start">
         {status === AppStatus.IDLE ? (
           <>
-            {/* === 模式一：文章列表 (首页) === */}
             {viewMode === 'list' && (
                <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
                   <div className="flex justify-between items-end border-b border-slate-100 pb-4">
@@ -503,7 +472,6 @@ const App: React.FC = () => {
                </div>
             )}
 
-            {/* === 模式二：上传/生成页面 === */}
             {viewMode === 'create' && (
               <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
                 <div className="text-center space-y-4">
@@ -564,7 +532,6 @@ const App: React.FC = () => {
           </>
         ) : (
           <div className="animate-in slide-in-from-bottom-4 duration-700">
-            {/* 文章展示区域 */}
             <div className={`bg-white min-h-[80vh] relative p-8 md:p-16 lg:px-24 border border-slate-100 shadow-sm ${status === AppStatus.ERROR && !outputText ? 'bg-red-50/10' : ''}`}>
               <div>
                 {status === AppStatus.ERROR && !outputText ? (
