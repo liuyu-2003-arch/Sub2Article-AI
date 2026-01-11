@@ -16,7 +16,6 @@ import {
   Save,
   Share2,
   Plus,
-  File,
   Calendar,
   LayoutGrid
 } from 'lucide-react';
@@ -36,8 +35,10 @@ const App: React.FC = () => {
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
 
+  // === 视图控制 ===
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
 
+  // R2 相关状态
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [historyList, setHistoryList] = useState<any[]>([]);
@@ -46,6 +47,7 @@ const App: React.FC = () => {
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
+  // 初始化：加载列表，检查 URL
   useEffect(() => {
     loadHistory();
 
@@ -64,7 +66,6 @@ const App: React.FC = () => {
 
             // 解析 URL 中的标题
             const rawName = articleId.split('/').pop() || '';
-            // 逻辑：去掉.md -> 去掉时间戳部分 -> 将下划线替换回空格
             const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Shared Article';
             setFileName(simpleName);
 
@@ -148,6 +149,7 @@ const App: React.FC = () => {
     reader.readAsText(file);
   };
 
+  // === 核心逻辑：文章生成 + 自动保存 ===
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
@@ -196,6 +198,11 @@ const App: React.FC = () => {
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("整理完成");
+
+      // === 新增：自动保存逻辑 ===
+      // 在生成完成后，直接调用保存函数
+      await performAutoSave(currentFullText);
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || "处理过程中发生错误，请稍后重试。");
@@ -203,15 +210,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSaveToCloud = async () => {
-    if (!outputText) return;
+  // 独立的执行保存函数 (用于自动保存和手动保存复用)
+  const performAutoSave = async (textToSave: string) => {
     setIsSaving(true);
+    setProcessStatus("正在自动保存...");
     try {
       // 1. 提取标题
-      const titleMatch = outputText.match(/^#+\s+(.*)/m);
+      const titleMatch = textToSave.match(/^#+\s+(.*)/m);
       let title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
-      // 去除 Markdown 符号
-      title = title.replace(/[*_~`]/g, '');
+      title = title.replace(/[*_~`]/g, ''); // 去除 markdown 格式
 
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
       if (!localStorage.getItem('sub2article_user_id')) {
@@ -219,7 +226,7 @@ const App: React.FC = () => {
       }
 
       // 2. 上传
-      const savedKey = await uploadToR2(outputText, title, userId);
+      const savedKey = await uploadToR2(textToSave, title, userId);
 
       setCurrentArticleKey(savedKey);
       updateUrlWithId(savedKey);
@@ -230,10 +237,18 @@ const App: React.FC = () => {
 
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (e) {
-      console.error(e);
-      alert("保存失败，请检查网络或 R2 配置");
+      console.error("Auto save failed:", e);
+      // 自动保存失败不应阻断用户阅读，这里可以只记录日志或显示轻微提示
     } finally {
       setIsSaving(false);
+      setProcessStatus("完成"); // 恢复完成状态
+    }
+  };
+
+  // 手动保存按钮调用 (如果用户在生成后修改了内容想重新保存)
+  const handleManualSave = async () => {
+    if (outputText) {
+      await performAutoSave(outputText);
     }
   };
 
@@ -317,8 +332,11 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-slate-200 selection:text-slate-900">
+      {/* === 修改点：统一容器宽度为 max-w-5xl ===
+         确保 Header, Main, Footer 对齐
+      */}
       <header className="bg-white/95 backdrop-blur-sm border-b border-slate-200 py-3 px-4 md:px-6 sticky top-0 z-50 transition-all">
-        <div className="max-w-4xl mx-auto flex justify-between items-center">
+        <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
             <button onClick={reset} className="flex items-center gap-2 group">
               <div className="bg-slate-900 p-1.5 rounded-lg shadow-sm group-hover:scale-105 transition-all duration-300">
@@ -355,9 +373,10 @@ const App: React.FC = () => {
                       </button>
                     )}
 
+                    {/* 未保存时显示保存按钮 (自动保存失败或手动修改后) */}
                     {!currentArticleKey && (
                       <button
-                        onClick={handleSaveToCloud}
+                        onClick={handleManualSave}
                         disabled={isSaving || saveSuccess}
                         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter'] ${saveSuccess ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
                       >
@@ -426,53 +445,59 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    // === 修改点：单列布局 ===
+                    <div className="flex flex-col gap-4">
                       {historyList.map((item) => {
-                        // === 修复列表标题显示 ===
-                        // 尝试从文件名解析: timestamp_Title.md
-                        // 先去掉 .md，再用 split('_')
+                        // 解析文件名用于显示
                         const rawName = item.Key.split('/').pop() || '';
-                        // 如果文件名中包含下划线（我们替换的空格），在这里尝试还原空格显示
-                        // split('_') 会把标题也切开，所以这里取 slice(1) 然后 join(' ')
-                        // 例如: 2026-01-12_Title_Part1_Part2 -> Title Part1 Part2
-                        let displayName = '无标题文章';
                         const parts = rawName.replace('.md', '').split('_');
+
+                        // 标题处理：如果文件名被下划线强力分割了，这里尝试拼接回看起来像句子的样子
+                        let displayName = '无标题文章';
                         if (parts.length > 1) {
                             displayName = parts.slice(1).join(' ');
                         } else if (parts.length === 1 && parts[0] !== '') {
-                            // 兼容旧文件（可能只有时间戳）
                             displayName = parts[0];
                         }
 
                         const date = new Date(item.LastModified).toLocaleDateString();
-                        
+
                         return (
-                          <div 
+                          <div
                             key={item.Key}
                             onClick={() => handleLoadArticle(item.Key)}
-                            className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 hover:border-slate-200 transition-all cursor-pointer relative"
+                            // === 修改点：移除左侧图标，增加内边距，优化阴影 ===
+                            className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:border-slate-200 transition-all cursor-pointer relative flex flex-col md:flex-row md:items-center justify-between gap-4"
                           >
-                             <div className="flex justify-between items-start mb-4">
-                               <div className="p-3 bg-slate-50 rounded-xl group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                                 <FileText className="w-6 h-6 text-slate-400 group-hover:text-indigo-600" />
+                             <div className="flex-1 min-w-0">
+                               <h3 className="text-xl font-bold text-slate-900 mb-1.5 line-clamp-2 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors">
+                                 {displayName}
+                               </h3>
+
+                               {/* === 模拟副标题位置 ===
+                                   由于我们之前移除了 metadata，这里没有真正的副标题数据。
+                                   此处仅作为占位，如果以后恢复了 metadata 可以放这里。
+                                   或者，如果标题很长，可以用 CSS line-clamp 显示更多行。
+                               */}
+                               {/* <p className="text-sm text-slate-500 font-['Inter'] line-clamp-1">
+                                  {displayName} 的中文翻译或副标题...
+                               </p> */}
+
+                               <div className="flex items-center gap-3 text-xs text-slate-400 font-['Inter'] mt-2">
+                                 <div className="flex items-center gap-1.5">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    <span>{date}</span>
+                                 </div>
                                </div>
-                               <button 
-                                  onClick={(e) => handleDeleteArticle(e, item.Key)}
-                                  className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                                  title="删除"
-                               >
-                                 <Trash2 className="w-4 h-4" />
-                               </button>
                              </div>
-                             
-                             <h3 className="text-lg font-bold text-slate-900 mb-2 line-clamp-2 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors">
-                               {displayName}
-                             </h3>
-                             
-                             <div className="flex items-center gap-2 text-xs text-slate-400 font-['Inter'] mt-4">
-                               <Calendar className="w-3.5 h-3.5" />
-                               <span>{date}</span>
-                             </div>
+
+                             <button
+                                onClick={(e) => handleDeleteArticle(e, item.Key)}
+                                className="self-start md:self-center p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                title="删除"
+                             >
+                               <Trash2 className="w-4 h-4" />
+                             </button>
                           </div>
                         )
                       })}
@@ -530,7 +555,7 @@ const App: React.FC = () => {
                       disabled={!inputText.trim()}
                       className={`group w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.99] font-['Inter'] ${!inputText.trim() ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/20'}`}
                     >
-                      <Sparkles className={`w-4 h-4 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} /> 
+                      <Sparkles className={`w-4 h-4 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} />
                       开启智能整理
                       <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                     </button>
@@ -556,10 +581,10 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <article className="
-                    prose prose-stone max-w-none 
-                    prose-lg 
-                    prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900 
-                    prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left 
+                    prose prose-stone max-w-none
+                    prose-lg
+                    prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900
+                    prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left
                     prose-h2:text-2xl prose-h2:mt-1 prose-h2:mb-8 prose-h2:text-left prose-h2:text-slate-500 prose-h2:font-normal
                     prose-hr:my-10 prose-hr:border-slate-200
                     prose-p:font-['Merriweather'] prose-p:text-slate-800 prose-p:leading-loose prose-p:mb-6
@@ -596,8 +621,11 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* === 修改点：统一 Footer 宽度为 max-w-5xl ===
+         确保与 Main 内容对齐
+      */}
       <footer className="py-8 px-6 border-t border-slate-200 mt-auto bg-white font-['Inter']">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
              <div className="flex items-center gap-4 text-sm text-slate-500">
                <span className="font-bold text-slate-900">Sub2Article AI</span>
                <span className="w-px h-3 bg-slate-300"></span>
