@@ -11,10 +11,10 @@ import {
   FileText,
   Trash2,
   Copy,
-  Loader2
+  Loader2,
+  ArrowRight // <--- 修复点：加回了 ArrowRight 组件
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-// 确保这里引入没报错，如果有波浪线说明 geminiService.ts 没更新对
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
 import { AppStatus } from './types';
 
@@ -84,7 +84,7 @@ const App: React.FC = () => {
       let currentFullText = initialText;
       let isFullyComplete = false;
       let loopCount = 0;
-      const MAX_LOOPS = 15; // === 安全中断：防止死循环导致网页崩溃 ===
+      const MAX_LOOPS = 15; // 安全中断
 
       let stream = processSubtitleToArticleStream(inputText, fileName || '');
 
