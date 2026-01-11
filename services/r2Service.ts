@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-// === 修复点：已修正 hhttps -> https，并填入您的新 Key ===
+// R2 Configuration
 const R2_ENDPOINT = "https://dd0afffd8fff1c8846db83bc10e2aa1f.r2.cloudflarestorage.com";
 const BUCKET_NAME = "sub2article";
 const ACCESS_KEY_ID = "566ba62b3c26a6a81ba2246147c2dd29";
@@ -18,24 +18,18 @@ const s3Client = new S3Client({
 
 /**
  * 上传文章到 R2
- * @param content 文章内容
- * @param title 文章标题
- * @param userId 用户ID
  */
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // 1. 强力过滤文件名：只保留字母、数字、中文、下划线
-  // 这里的正则 [^\w\u4e00-\u9fa5-] 会把所有特殊符号（空格、问号等）替换为下划线
-  let safeTitle = title.replace(/[^\w\u4e00-\u9fa5-]/g, "_");
+  // 1. 过滤文件名：保留字母、数字、中文、下划线、空格(会被转为_)
+  // 允许中文是关键
+  let safeTitle = title.replace(/[^\w\u4e00-\u9fa5\s-]/g, "");
+  safeTitle = safeTitle.replace(/\s+/g, "_"); // 空格转下划线
 
-  // 2. 避免连续下划线 (e.g. "Title___Name" -> "Title_Name")
-  safeTitle = safeTitle.replace(/_+/g, "_");
+  // 2. 长度限制增加到 200，以容纳双语标题
+  safeTitle = safeTitle.substring(0, 200);
 
-  // 3. 限制长度，防止文件名过长
-  safeTitle = safeTitle.substring(0, 50);
-
-  // 最终路径：articles/用户ID/时间戳_标题.md
   const fileName = `articles/${userId}/${timestamp}_${safeTitle}.md`;
 
   const command = new PutObjectCommand({
@@ -43,7 +37,6 @@ export async function uploadToR2(content: string, title: string, userId: string)
     Key: fileName,
     Body: content,
     ContentType: "text/markdown; charset=utf-8",
-    // 注意：这里没有 Metadata 字段，以避免 400 Bad Request
   });
 
   try {
@@ -68,7 +61,6 @@ export async function listArticles(userId: string) {
 
   try {
     const response = await s3Client.send(command);
-    // 按时间倒序排列
     return (response.Contents || []).sort((a, b) =>
         (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0)
     );
