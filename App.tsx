@@ -44,6 +44,7 @@ const App: React.FC = () => {
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
+  // 初始化
   useEffect(() => {
     loadHistory();
 
@@ -60,7 +61,6 @@ const App: React.FC = () => {
             setOutputText(content);
             setCurrentArticleKey(articleId);
 
-            // 解析 URL 标题
             const rawName = articleId.split('/').pop() || '';
             const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Shared Article';
             setFileName(simpleName);
@@ -189,7 +189,7 @@ const App: React.FC = () => {
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("整理完成");
 
-      // === 生成完成后自动保存 ===
+      // === 自动保存逻辑 ===
       await performAutoSave(currentFullText);
 
     } catch (err: any) {
@@ -202,11 +202,11 @@ const App: React.FC = () => {
   const performAutoSave = async (textToSave: string) => {
     setIsSaving(true);
     try {
-      // 1. 尝试提取 H1 (英文标题)
+      // 1. 提取 H1 (英文标题)
       const h1Match = textToSave.match(/^#\s+(.+)$/m);
       const h1 = h1Match ? h1Match[1].trim().replace(/[*_~`]/g, '') : '';
 
-      // 2. 尝试提取 H2 (中文标题)
+      // 2. 提取 H2 (中文标题)
       const h2Match = textToSave.match(/^##\s+(.+)$/m);
       const h2 = h2Match ? h2Match[1].trim().replace(/[*_~`]/g, '') : '';
 
@@ -330,6 +330,7 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+             {/* 仅在首页显示添加按钮 */}
              {viewMode === 'list' && status === AppStatus.IDLE && (
                 <button
                   onClick={goCreate}
@@ -377,13 +378,8 @@ const App: React.FC = () => {
         {status === AppStatus.IDLE ? (
           <>
             {viewMode === 'list' && (
-               <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
-                  <div className="flex justify-between items-end border-b border-slate-100 pb-4">
-                    <div>
-                      <h2 className="text-3xl font-black text-slate-900 font-['Playfair_Display']">已保存的文章</h2>
-                      {/* Removed "My Knowledge Base" */}
-                    </div>
-                  </div>
+               <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500 mt-4">
+                  {/* === 修改点：移除顶部的“已保存文章”标题区域 === */}
 
                   {isLoadingHistory ? (
                     <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
@@ -396,21 +392,23 @@ const App: React.FC = () => {
                       </button>
                     </div>
                   ) : (
-                    // === 1. 单列布局 grid-cols-1 ===
+                    // === 修改点：强制单列布局 ===
                     <div className="grid grid-cols-1 gap-4">
                       {historyList.map((item) => {
                         const rawName = item.Key.split('/').pop() || '';
                         const fullName = rawName.replace('.md', '').split('_').slice(1).join(' ') || '无标题文章';
 
-                        // === 2. 尝试分离双语标题 (简单逻辑：用正则找第一个汉字的位置) ===
+                        // === 修改点：尝试分离双语标题 (更智能的分割) ===
                         let mainTitle = fullName;
                         let subTitle = '';
-                        // 匹配第一个汉字
+                        // 逻辑：找到第一个中文字符，这通常是副标题的开始
                         const chineseMatch = fullName.match(/[\u4e00-\u9fa5]/);
                         if (chineseMatch && chineseMatch.index > 0) {
-                            // 如果汉字不是在最开头，认为前面是英文，后面是中文
                             mainTitle = fullName.substring(0, chineseMatch.index).trim();
                             subTitle = fullName.substring(chineseMatch.index).trim();
+                        } else if (/[\u4e00-\u9fa5]/.test(fullName) && !/[a-zA-Z]/.test(fullName)) {
+                            // 只有中文的情况
+                            mainTitle = fullName;
                         }
 
                         const date = new Date(item.LastModified).toLocaleDateString();
@@ -419,16 +417,16 @@ const App: React.FC = () => {
                           <div
                             key={item.Key}
                             onClick={() => handleLoadArticle(item.Key)}
-                            // === 3. 移除图标，纯文字排版 ===
+                            // === 修改点：移除左侧文件图标，优化样式 ===
                             className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:border-slate-200 transition-all cursor-pointer relative flex flex-col justify-start"
                           >
                              <div className="flex-1 min-w-0 pr-8">
-                               {/* 主标题 (英文) */}
+                               {/* 主标题 */}
                                <h3 className="text-xl font-bold text-slate-900 mb-1 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors">
                                  {mainTitle}
                                </h3>
 
-                               {/* 副标题 (中文) - 如果有 */}
+                               {/* 副标题 (如果有) */}
                                {subTitle && (
                                  <p className="text-base text-slate-500 font-['Noto_Sans_SC'] mt-1">
                                    {subTitle}
@@ -458,7 +456,7 @@ const App: React.FC = () => {
 
             {viewMode === 'create' && (
               <div className="animate-in fade-in zoom-in-95 duration-700 mt-4">
-                {/* === 移除顶部 Hero 标题和 features，实现“一页显示” === */}
+                {/* === 修改点：移除顶部的 Hero 文字介绍，只保留输入卡片 === */}
                 <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 p-2 overflow-hidden transition-all hover:shadow-2xl hover:shadow-slate-200/80">
                   <div className="bg-slate-50 rounded-xl p-8 space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
