@@ -12,10 +12,16 @@ import {
   Trash2,
   Copy,
   Loader2,
-  ArrowRight
+  ArrowRight,
+  Save,       // 新增图标
+  History,    // 新增图标
+  X,          // 新增图标
+  File        // 新增图标
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
+// 引入 R2 服务
+import { uploadToR2, listArticles, getArticleContent, deleteArticle } from './services/r2Service';
 import { AppStatus } from './types';
 
 const App: React.FC = () => {
@@ -27,6 +33,13 @@ const App: React.FC = () => {
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
+
+  // R2 相关状态
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyList, setHistoryList] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
@@ -54,13 +67,29 @@ const App: React.FC = () => {
     }
   }, [outputText, status]);
 
+  // 加载历史文章列表
+  useEffect(() => {
+    if (showHistory) {
+      loadHistory();
+    }
+  }, [showHistory]);
+
+  const loadHistory = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const list = await listArticles();
+      setHistoryList(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // === 修改点：更彻底地清理文件名后缀 ===
-    // 1. 去除文件扩展名 (.srt, .txt 等)
-    // 2. 去除语言标记 (.en, .zh, .zh-CN 等)
     let nameClean = file.name.replace(/\.[^.]+$/, "");
     nameClean = nameClean.replace(/\.(en|zh|zh-CN|us|uk|jp|kr)$/i, "");
 
@@ -77,12 +106,12 @@ const App: React.FC = () => {
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
-    // H1 由前端生成，Gemini 负责生成紧随其后的 H2 和正文
     const initialText = fileName ? `# ${fileName}\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
     setProcessStatus("准备开始...");
     setError(null);
+    setSaveSuccess(false); // 重置保存状态
 
     try {
       let currentFullText = initialText;
@@ -127,6 +156,56 @@ const App: React.FC = () => {
     }
   };
 
+  // 保存到 R2
+  const handleSaveToCloud = async () => {
+    if (!outputText) return;
+    setIsSaving(true);
+    try {
+      // 提取标题作为文件名的一部分，如果没找到标题则用 "Untitled"
+      const titleMatch = outputText.match(/^#+\s+(.*)/m);
+      const title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
+
+      await uploadToR2(outputText, title);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (e) {
+      alert("保存失败，请检查 R2 配置");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 加载选中的历史文章
+  const handleLoadArticle = async (key: string) => {
+    try {
+      setStatus(AppStatus.LOADING);
+      setProcessStatus("正在加载文章...");
+      setShowHistory(false); // 关闭侧边栏
+
+      const content = await getArticleContent(key);
+      setOutputText(content);
+
+      // 尝试从文件名恢复简单的标题显示
+      const simpleName = key.split('_').pop()?.replace('.md', '') || 'Imported Article';
+      setFileName(simpleName);
+
+      setStatus(AppStatus.SUCCESS);
+      setProcessStatus("加载完成");
+    } catch (e) {
+      setError("加载文章失败");
+      setStatus(AppStatus.ERROR);
+    }
+  };
+
+  // 删除文章
+  const handleDeleteArticle = async (e: React.MouseEvent, key: string) => {
+    e.stopPropagation();
+    if (confirm("确定要删除这篇文章吗？")) {
+      await deleteArticle(key);
+      loadHistory(); // 刷新列表
+    }
+  };
+
   const reset = () => {
     setStatus(AppStatus.IDLE);
     setOutputText('');
@@ -134,6 +213,7 @@ const App: React.FC = () => {
     setError(null);
     setProcessStatus('');
     setProgress(0);
+    setSaveSuccess(false);
   };
 
   const copyForNotion = () => {
@@ -172,6 +252,15 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
+             {/* 历史文章按钮 */}
+             <button
+                onClick={() => setShowHistory(true)}
+                className="text-slate-500 hover:text-slate-900 hover:bg-slate-100 px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 font-['Inter']"
+              >
+                <History className="w-4 h-4" />
+                <span className="hidden sm:inline">我的文章</span>
+              </button>
+
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
 
@@ -190,6 +279,22 @@ const App: React.FC = () => {
 
                 {outputText && (
                   <>
+                     {/* 保存到云端按钮 */}
+                    <button
+                      onClick={handleSaveToCloud}
+                      disabled={isSaving || saveSuccess}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter'] ${saveSuccess ? 'text-emerald-600 bg-emerald-50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                    >
+                      {isSaving ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : saveSuccess ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Save className="w-3.5 h-3.5" />
+                      )}
+                      {saveSuccess ? '已保存' : '保存'}
+                    </button>
+
                     <button
                       onClick={copyForNotion}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
@@ -318,13 +423,10 @@ const App: React.FC = () => {
                     prose-lg
                     prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900
 
-                    /* H1 样式：紧凑下边距 */
                     prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left
 
-                    /* H2 样式：用作副标题，紧凑上边距，灰色，稍微小一点 */
                     prose-h2:text-2xl prose-h2:mt-1 prose-h2:mb-8 prose-h2:text-left prose-h2:text-slate-500 prose-h2:font-normal
 
-                    /* 分隔线样式 */
                     prose-hr:my-10 prose-hr:border-slate-200
 
                     prose-p:font-['Merriweather'] prose-p:text-slate-800 prose-p:leading-loose prose-p:mb-6
@@ -360,6 +462,67 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* 历史文章侧边栏 (Drawer) */}
+      {showHistory && (
+        <div className="fixed inset-0 z-[60] flex justify-end">
+           {/* 遮罩 */}
+           <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setShowHistory(false)} />
+
+           {/* 侧边栏内容 */}
+           <div className="relative w-full max-w-md bg-white h-full shadow-2xl p-6 flex flex-col animate-in slide-in-from-right duration-300">
+             <div className="flex justify-between items-center mb-6">
+               <h3 className="text-xl font-bold font-['Playfair_Display'] text-slate-900">我的文章</h3>
+               <button onClick={() => setShowHistory(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
+                 <X className="w-5 h-5" />
+               </button>
+             </div>
+
+             <div className="flex-1 overflow-y-auto space-y-3 pr-2">
+                {isLoadingHistory ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                  </div>
+                ) : historyList.length === 0 ? (
+                  <div className="text-center py-20 text-slate-400 font-['Inter']">
+                    <p>暂无保存的文章</p>
+                    <p className="text-xs mt-2">点击“保存”按钮将文章存到云端</p>
+                  </div>
+                ) : (
+                  historyList.map((item) => {
+                    // 解析文件名显示
+                    const displayName = item.Key.split('_').slice(1).join('_').replace('.md', '') || '无标题文章';
+                    const date = new Date(item.LastModified).toLocaleDateString();
+
+                    return (
+                      <div key={item.Key}
+                           onClick={() => handleLoadArticle(item.Key)}
+                           className="group p-4 border border-slate-100 rounded-xl hover:border-slate-300 hover:bg-slate-50 cursor-pointer transition-all flex justify-between items-start"
+                      >
+                         <div className="flex items-start gap-3 overflow-hidden">
+                           <div className="mt-1 p-2 bg-white border border-slate-100 rounded-lg text-slate-500 group-hover:text-slate-900 group-hover:border-slate-300 transition-colors">
+                             <File className="w-4 h-4" />
+                           </div>
+                           <div className="flex-1 min-w-0">
+                             <h4 className="font-bold text-slate-800 text-sm truncate pr-2 font-['Inter'] group-hover:text-indigo-600 transition-colors">{displayName}</h4>
+                             <p className="text-xs text-slate-400 mt-1">{date}</p>
+                           </div>
+                         </div>
+                         <button
+                            onClick={(e) => handleDeleteArticle(e, item.Key)}
+                            className="text-slate-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                            title="删除"
+                         >
+                           <Trash2 className="w-4 h-4" />
+                         </button>
+                      </div>
+                    )
+                  })
+                )}
+             </div>
+           </div>
+        </div>
+      )}
 
       <footer className="py-8 px-6 border-t border-slate-200 mt-auto bg-white font-['Inter']">
         <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
