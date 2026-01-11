@@ -1,50 +1,58 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
-// === 核心 Prompt 修改 ===
-// 1. 增加了“禁止使用列表符号”的指令
-// 2. 增加了“文章总结”的生成指令
-const BASE_PROMPT = `附件是一个视频语音识别转成的文字，请分析其语言内容并按以下规则整理：
+// === 增强版 Prompt ===
+// 核心改动：
+// 1. 引入 "Block" 概念，强迫 AI 将内容视为一个个独立的块来处理，防止格式跑偏。
+// 2. 增加了 Negative Constraints (负向约束) 来禁止列表符号。
+// 3. 明确了“结尾信号”，确保总结一定会出现。
 
-1. **如果是英文（或中英双语）内容**：
-   - **第一步（合并）**：首先将细碎的字幕行合并成逻辑完整、通顺的【英文段落】。
-   - **第二步（翻译）**：将整理好的英文段落翻译成地道的【中文段落】。
-   - **第三步（输出格式）**：请严格按照**“一段英文，一段中文”**的格式输出。
-     * **正确格式示例**：
+const BASE_PROMPT = `你是一个专业的字幕整理与翻译助手。你的任务是将杂乱的语音识别文本重组为一篇格式完美的【英中对照】文章。
 
-       Here is the content of the first English paragraph. It should be a complete logical section without any bullet points at the beginning.
+【处理流程】：
+1. **重组（Rephrase）**：将细碎的字幕行合并成逻辑通顺、语义完整的**长段落**。不要逐句翻译，要按“自然段”处理。
+2. **翻译（Translate）**：将合并后的英文段落翻译成地道的中文段落。
+3. **输出（Output）**：严格按照下面的格式输出。
 
-       这是第一段英文对应的中文翻译内容。
+【严格的输出格式规范】：
+- **格式结构**：
+  [英文自然段文本]
+  (空一行)
+  [对应的中文翻译自然段]
+  (空一行)
+  [下一个英文自然段文本]
+  ...
 
-       Here is the content of the second English paragraph.
+- **禁止事项**：
+  ❌ **严禁**使用任何列表符号（如 -、*、•、1. 等）作为段落开头。
+  ❌ **严禁**只输出英文不输出中文，必须成对出现。
+  ❌ **严禁**使用方括号 [] 包裹内容。
 
-       这是第二段英文对应的中文翻译内容。
+- **结尾要求**：
+  当所有正文内容处理完毕后，必须：
+  1. 输出一个分隔线：---
+  2. 输出二级标题：## 文章总结
+  3. 用中文列出 3-5 点核心内容摘要（此处可以使用列表符号）。
 
-   - **严禁（非常重要）**：英文和中文段落开头**绝对不要**添加圆点（•）、短横线（-）、星号（*）等列表符号，直接输出纯文本。
-   - **完整性**：每一段英文后面**必须**紧跟其中文翻译，不得遗漏。
+【示例】：
+The longest study on happiness has shown that deep relationships are key to our well-being. It's not about money or fame, but about the connections we build.
 
-2. **如果是纯中文内容**：
-   - 请整理成通顺的中文段落，修改错别字，优化标点，保持逻辑清晰。
+这项关于幸福的最长研究表明，深厚的人际关系是我们幸福的关键。这与金钱或名声无关，而在于我们建立的联系。
 
-3. **文章结尾要求**：
-   - 在正文全部结束后，请输出一个分隔线 `---`。
-   - 然后换行输出二级标题 `## 文章总结`。
-   - 接着用中文列出 3-5 点文章的核心内容总结。
-
-**通用极其重要规则**：
-- **完整性**：不要删除任何核心信息，保持内容完整。
-- **格式**：使用 Markdown 格式（如粗体强调重点等）。
-- **零废话**：**禁止**添加任何开场白（如“好的...”），直接开始输出正文。`;
+(Next paragraph...)
+`;
 
 const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成因为长度限制中断了。
 
 【任务目标】：
 请根据提供的【原始全文】和【已生成的结尾内容】，定位中断位置，并**紧接着**继续生成剩余部分。
 
-【格式要求】：
-1. **严格保持**之前的格式（一段英文，一段中文）。
-2. **严禁**使用列表符号（如 • 或 -）作为段落开头。
-3. **严禁**重复已生成的内容。
-4. 如果正文已经结束，请检查是否已生成“文章总结”；如果没有，请在末尾补充分隔线 `---` 和 `## 文章总结`。
+【强制约束】：
+1. **保持格式**：继续按照“一段英文（无列表符）、空行、一段中文（无列表符）”的格式输出。
+2. **禁止列表**：正文段落开头绝对不能有 - 或 *。
+3. **检查结尾**：如果原文内容已全部处理完，**必须**在最后生成：
+   ---
+   ## 文章总结
+   (3-5点总结内容)
 
 【输入数据】：`;
 
@@ -65,17 +73,14 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
   let finalPrompt = BASE_PROMPT;
   if (title) {
     finalPrompt += `\n
-【关于标题处理】：
-系统已自动生成了英文主标题（H1）："${title}"
-**你的任务是**：
-将该英文标题翻译成中文，并直接作为 **二级标题 (##)** 输出在正文最开始。
-示例输出结构：
-## [这里直接输出中文翻译结果]
+【标题任务】：
+文章开头请先输出一级标题的中文翻译，使用二级标题格式 (## )，例如：
+## ${title} (中文翻译)
 
-[正文开始...]
+然后直接开始正文整理。
 `;
   } else {
-    finalPrompt += `\n【注意】：直接开始整理正文内容，无需生成主标题。`;
+    finalPrompt += `\n【注意】：直接开始整理正文内容。`;
   }
 
   try {
@@ -83,7 +88,7 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
       model: 'gemini-2.0-flash',
       contents: `${finalPrompt}\n\n待处理文字如下：\n---\n${text}`,
       config: {
-        temperature: 0.1,
+        temperature: 0.1, // 低温度保持格式稳定
         topP: 0.95,
         topK: 40,
       },
@@ -111,7 +116,9 @@ export async function* continueProcessingStream(originalText: string, currentOut
     throw new Error("Missing API Key");
   }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const lastPart = currentOutput.slice(-800);
+
+  // 截取更多上下文以确保格式连贯，但不要太长以免占用 token
+  const lastPart = currentOutput.slice(-1000);
 
   try {
     const responseStream = await ai.models.generateContentStream({
