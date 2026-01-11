@@ -13,7 +13,8 @@ import {
   Copy,
   ChevronRight,
   ArrowRight,
-  PlayCircle // 新增图标
+  PlayCircle,
+  Loader2 // 新增 Loader 图标
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
@@ -26,39 +27,20 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [error, setError] = useState<string | null>(null);
   const [notionCopied, setNotionCopied] = useState<boolean>(false);
-  const [progress, setProgress] = useState(0);
+
+  // 新增：具体的进度状态文字
+  const [processStatus, setProcessStatus] = useState<string>('');
+  // 新增：文章是否真正完成的标记
+  const [isStreamFinished, setIsStreamFinished] = useState<boolean>(false);
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let interval: number;
-    if (status === AppStatus.LOADING) {
-      setProgress(0);
-      interval = window.setInterval(() => {
-        setProgress(prev => {
-          if (prev < 90) return prev + Math.random() * 5;
-          return prev;
-        });
-      }, 300);
-    } else if (status === AppStatus.SUCCESS) {
-      setProgress(100);
-    }
-    return () => clearInterval(interval);
-  }, [status]);
-
+  // 自动滚动
   useEffect(() => {
     if (status === AppStatus.LOADING || status === AppStatus.SUCCESS) {
-      // 只有在非用户手动滚动时才自动滚动到底部（这里简化处理，总是滚动）
       outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [outputText, status]);
-
-  const getLoadingMessage = (p: number) => {
-    if (p < 25) return "AI 助手已就绪...";
-    if (p < 50) return "解析语言逻辑中...";
-    if (p < 75) return "内容重组与分段优化...";
-    return "即将完成，准备润色输出...";
-  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -78,22 +60,38 @@ const App: React.FC = () => {
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
-    // 自动将文件名作为 H1 标题
+    // 初始化状态
     const initialText = fileName ? `# ${fileName}\n\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
+    setProcessStatus("正在连接 AI 服务..."); // 初始状态
+    setIsStreamFinished(false); // 重置完成状态
     setError(null);
 
     try {
-      // 传入 fileName 以便生成翻译副标题
       const stream = processSubtitleToArticleStream(inputText, fileName || '');
+
       let fullText = initialText;
+      let hasReceivedFirstChunk = false;
+
       for await (const chunk of stream) {
-        fullText += chunk;
+        // 收到第一个块时更新状态
+        if (!hasReceivedFirstChunk && chunk.text) {
+            hasReceivedFirstChunk = true;
+            setProcessStatus("正在智能重组与翻译...");
+        }
+
+        fullText += chunk.text;
         setOutputText(fullText);
+
+        // 实时检查是否完成
+        if (chunk.isComplete) {
+            setIsStreamFinished(true);
+        }
       }
 
       setStatus(AppStatus.SUCCESS);
+      setProcessStatus("整理完成");
     } catch (err: any) {
       setError(err.message || "处理过程中发生错误，请稍后重试。");
       setStatus(AppStatus.ERROR);
@@ -104,26 +102,35 @@ const App: React.FC = () => {
     if (!inputText.trim() || !outputText) return;
 
     const preText = outputText;
-    setStatus(AppStatus.LOADING);
+    setStatus(AppStatus.LOADING); // 重新进入 Loading 状态
+    setProcessStatus("正在衔接上下文..."); // 更新状态文字
     setError(null);
 
     try {
-      // 调用续写服务
       const stream = continueProcessingStream(inputText, preText);
       let fullText = preText;
-
-      // 添加换行，确保和上一段分开
       fullText += "\n\n";
 
+      let hasReceivedFirstChunk = false;
+
       for await (const chunk of stream) {
-        fullText += chunk;
+        if (!hasReceivedFirstChunk && chunk.text) {
+            hasReceivedFirstChunk = true;
+            setProcessStatus("正在继续生成...");
+        }
+
+        fullText += chunk.text;
         setOutputText(fullText);
+
+        if (chunk.isComplete) {
+            setIsStreamFinished(true);
+        }
       }
 
       setStatus(AppStatus.SUCCESS);
+      setProcessStatus("整理完成");
     } catch (err: any) {
       setError("续写失败: " + (err.message || "请重试"));
-      // 保持 ERROR 状态，这样用户可以看到错误信息，但内容还保留着
       setStatus(AppStatus.ERROR);
     }
   };
@@ -133,7 +140,8 @@ const App: React.FC = () => {
     setOutputText('');
     setFileName('');
     setError(null);
-    setProgress(0);
+    setProcessStatus('');
+    setIsStreamFinished(false);
   };
 
   const copyForNotion = () => {
@@ -188,16 +196,8 @@ const App: React.FC = () => {
             </a>
           </div>
         </div>
-        {status === AppStatus.LOADING && (
-          <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-slate-50 z-50">
-            <div
-              className="h-full gradient-bg transition-all duration-500 ease-out relative shadow-[0_0_12px_rgba(99,102,241,0.5)]"
-              style={{ width: `${progress}%` }}
-            >
-              <div className="absolute top-0 right-0 h-full w-24 bg-gradient-to-r from-transparent to-white/30 animate-pulse" />
-            </div>
-          </div>
-        )}
+
+        {/* 这里移除了旧的顶部假进度条，改为在内容区域显示真实状态 */}
       </header>
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-8 md:py-12 flex flex-col justify-start">
@@ -260,7 +260,8 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-4">
+            {/* Feature grid omitted for brevity, same as before */}
+             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-4">
               {[
                 { title: '智能分段', desc: '根据语义自动划分自然段落', icon: Brain },
                 { title: '错别字纠正', desc: '自动修复语音识别常见的谐音错字', icon: Check },
@@ -280,19 +281,35 @@ const App: React.FC = () => {
           <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-700">
             <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white/50 backdrop-blur-sm p-3 rounded-2xl border border-slate-100/50">
               <div className="flex items-center gap-3 px-2">
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <h2 className="text-sm font-bold text-slate-800">
-                  整理结果已生成
-                </h2>
+                {/* 状态指示器：根据是否完成显示不同图标和文字 */}
+                {status === AppStatus.LOADING ? (
+                   <div className="flex items-center gap-3">
+                     <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center">
+                       <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                     </div>
+                     <div className="flex flex-col">
+                       <h2 className="text-sm font-bold text-slate-800">正在处理中</h2>
+                       <span className="text-[10px] font-medium text-indigo-500 animate-pulse">{processStatus}</span>
+                     </div>
+                   </div>
+                ) : (
+                   <div className="flex items-center gap-3">
+                     <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                       <Check className="w-4 h-4" />
+                     </div>
+                     <div className="flex flex-col">
+                        <h2 className="text-sm font-bold text-slate-800">整理完成</h2>
+                        <span className="text-[10px] font-medium text-slate-400">已生成全部内容</span>
+                     </div>
+                   </div>
+                )}
               </div>
+
               {outputText && (
                 <div className="flex items-center gap-2 shrink-0">
                   <button onClick={copyForNotion} className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all text-xs font-bold shadow-lg shadow-slate-200 group relative whitespace-nowrap">
                     {notionCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-white" />}
                     {notionCopied ? '已复制全文' : '复制全文'}
-                    {notionCopied && <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-[10px] py-1 px-2 rounded-md animate-bounce">Success!</div>}
                   </button>
                   <button onClick={downloadResult} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all text-xs font-bold shadow-lg shadow-indigo-100 whitespace-nowrap">
                     <Download className="w-3.5 h-3.5" /> 下载 Markdown
@@ -322,22 +339,32 @@ const App: React.FC = () => {
                         {status === AppStatus.LOADING && (
                           <div className="inline-flex items-center mt-6">
                             <span className="inline-block w-2 h-6 bg-indigo-500 animate-pulse align-middle" />
-                            <span className="ml-3 text-indigo-400 text-xs font-bold animate-pulse">AI 正在深度创作...</span>
+                            <span className="ml-3 text-indigo-400 text-xs font-bold animate-pulse">{processStatus}</span>
                           </div>
                         )}
 
-                        {/* === “继续生成”按钮区域 === */}
-                        {status !== AppStatus.LOADING && (
+                        {/* === “继续生成”按钮逻辑 === */}
+                        {/* 只有在 非Loading 状态 且 尚未完全结束（isStreamFinished 为 false）时才显示 */}
+                        {status !== AppStatus.LOADING && !isStreamFinished && (
                           <div className="mt-12 pt-8 border-t border-dashed border-slate-200 flex justify-center">
                             <button
                               onClick={handleContinue}
                               className="group flex items-center gap-2 px-6 py-3 bg-white border-2 border-indigo-100 text-indigo-600 rounded-full font-bold hover:bg-indigo-50 hover:border-indigo-200 hover:scale-105 transition-all shadow-sm"
                             >
                               <PlayCircle className="w-5 h-5" />
-                              文章未完？点击继续生成
+                              文章似乎未完？点击继续生成
                               <ChevronRight className="w-4 h-4 text-indigo-400 group-hover:translate-x-1 transition-transform" />
                             </button>
                           </div>
+                        )}
+
+                        {/* 如果已完成，显示一个小的结束标记 */}
+                        {isStreamFinished && (
+                           <div className="mt-12 py-4 flex justify-center text-slate-300">
+                             <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
+                             <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
+                             <div className="w-1.5 h-1.5 rounded-full bg-slate-200 mx-1"></div>
+                           </div>
                         )}
                       </div>
                     ) : (
@@ -349,24 +376,15 @@ const App: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="space-y-8 w-full max-w-sm">
-                          <div className="text-center space-y-2">
-                            <p className="text-slate-800 font-extrabold text-xl">
-                              {getLoadingMessage(progress)}
+                        <div className="space-y-4 w-full max-w-sm text-center">
+                            <p className="text-slate-800 font-extrabold text-xl animate-pulse">
+                              {processStatus}
                             </p>
                             <div className="flex items-center justify-center gap-1">
                               <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
                               <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
                               <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" />
                             </div>
-                          </div>
-
-                          <div className="space-y-5 px-6">
-                            <div className="h-2.5 bg-slate-50 rounded-full w-full animate-pulse" />
-                            <div className="h-2.5 bg-slate-50 rounded-full w-4/5 animate-pulse delay-75" />
-                            <div className="h-2.5 bg-slate-50 rounded-full w-5/6 animate-pulse delay-150" />
-                            <div className="h-2.5 bg-slate-50 rounded-full w-2/3 animate-pulse delay-200" />
-                          </div>
                         </div>
                       </div>
                     )}
@@ -380,6 +398,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-10 px-6 border-t border-slate-50 mt-auto bg-white/40">
+         {/* Footer content same as before */}
         <div className="max-w-4xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-[11px] text-slate-400 font-semibold tracking-wider uppercase">
              <div className="flex items-center gap-6">

@@ -1,6 +1,6 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
-// 基础 Prompt：定义了段落对照格式、禁止方括号等核心规则
+// 基础 Prompt (保持不变)
 const BASE_PROMPT = `附件是一个视频语音识别转成的文字，请分析其语言内容并按以下规则整理：
 
 1. **如果是英文（或中英双语）内容**：
@@ -28,7 +28,6 @@ const BASE_PROMPT = `附件是一个视频语音识别转成的文字，请分�
 - **格式**：使用 Markdown 格式（如粗体强调重点等）。
 - **零废话**：**禁止**添加任何开场白（如“好的...”）或结语。`;
 
-// 续写专用 Prompt
 const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成因为长度限制中断了。
 
 【任务目标】：
@@ -42,19 +41,19 @@ const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成�
 
 【输入数据】：`;
 
+// 定义返回结构，包含文本和结束状态
+export interface StreamUpdate {
+  text: string;
+  isComplete: boolean;
+}
+
 /**
  * 处理字幕的主函数
- * @param text 字幕原文
- * @param title 文件名（可选），用于生成翻译副标题
  */
-export async function* processSubtitleToArticleStream(text: string, title: string = '') {
-  // Use direct initialization with process.env.API_KEY
+export async function* processSubtitleToArticleStream(text: string, title: string = ''): AsyncGenerator<StreamUpdate> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // 动态构建 Prompt
   let finalPrompt = BASE_PROMPT;
-
-  // 如果有标题，增加“翻译标题”的特定指令
   if (title) {
     finalPrompt += `\n
 【关于标题处理】：
@@ -83,7 +82,15 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
 
     for await (const chunk of responseStream) {
       const part = chunk as GenerateContentResponse;
-      yield part.text || "";
+      const textChunk = part.text || "";
+      const finishReason = part.candidates?.[0]?.finishReason;
+
+      // 判断是否完成：如果有 finishReason 且不是 MAX_TOKENS，则认为已完成
+      // STOP = 正常结束
+      // MAX_TOKENS = 长度达到上限（未完成）
+      const isComplete = finishReason === 'STOP';
+
+      yield { text: textChunk, isComplete };
     }
   } catch (error) {
     console.error("Gemini processing error:", error);
@@ -93,13 +100,9 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
 
 /**
  * 续写处理函数
- * @param originalText 原始的完整字幕
- * @param currentOutput 目前已生成的文章内容
  */
-export async function* continueProcessingStream(originalText: string, currentOutput: string) {
+export async function* continueProcessingStream(originalText: string, currentOutput: string): AsyncGenerator<StreamUpdate> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-  // 截取已生成内容的最后 800 个字符作为“定位锚点”，帮助 AI 找回上下文
   const lastPart = currentOutput.slice(-800);
 
   try {
@@ -121,7 +124,11 @@ ${originalText}`,
 
     for await (const chunk of responseStream) {
       const part = chunk as GenerateContentResponse;
-      yield part.text || "";
+      const textChunk = part.text || "";
+      const finishReason = part.candidates?.[0]?.finishReason;
+      const isComplete = finishReason === 'STOP';
+
+      yield { text: textChunk, isComplete };
     }
   } catch (error) {
     console.error("Gemini continue error:", error);
