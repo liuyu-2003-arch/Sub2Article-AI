@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-// R2 Configuration
+// R2 配置 (保持您原来的配置)
 const R2_ENDPOINT = "https://dd0afffd8fff1c8846db83bc10e2aa1f.r2.cloudflarestorage.com";
 const BUCKET_NAME = "cloud-r2";
 const ACCESS_KEY_ID = "Xb-WOGu9jnwkkdJHRXR4X7V-JOI3WYtGRzVB6Tkh";
@@ -18,19 +18,19 @@ const s3Client = new S3Client({
 
 /**
  * 上传文章到 R2
- * @param content 文章 Markdown 内容
- * @param title 文章标题 (用于生成文件名)
- * @param userId 用户 ID (用于文件夹隔离)
+ * @param content 文章内容
+ * @param title 文章标题
+ * @param userId 用户ID
  */
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // 过滤文件名中的非法字符，将空格替换为下划线
-  // 比如: "What is a good life?" -> "What_is_a_good_life_"
-  const safeTitle = title.replace(/[\\/:*?"<>|\s]/g, "_").substring(0, 50);
+  // === 关键修复：强力过滤文件名 ===
+  // 1. [^\w\u4e00-\u9fa5-] 匹配所有非(字母/数字/下划线/汉字/连字符)的字符
+  // 2. 将这些字符（包括空格、问号、标点）全部替换为 "_"
+  const safeTitle = title.replace(/[^\w\u4e00-\u9fa5-]/g, "_").substring(0, 50);
 
-  // 文件名格式: articles/user_id/时间戳_标题.md
-  // 这样列表读取时，可以从文件名解析出标题
+  // 最终文件名类似: articles/default_user/2026-01-12_What_is_the_secret_.md
   const fileName = `articles/${userId}/${timestamp}_${safeTitle}.md`;
 
   const command = new PutObjectCommand({
@@ -38,6 +38,7 @@ export async function uploadToR2(content: string, title: string, userId: string)
     Key: fileName,
     Body: content,
     ContentType: "text/markdown; charset=utf-8",
+    // 将原始标题存入 Metadata，方便以后可能的展示（注意要 encode）
     Metadata: {
         "x-amz-meta-title": encodeURIComponent(title)
     }
@@ -65,7 +66,6 @@ export async function listArticles(userId: string) {
 
   try {
     const response = await s3Client.send(command);
-    // 按时间倒序排列 (最新的在前面)
     return (response.Contents || []).sort((a, b) =>
         (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0)
     );
@@ -75,6 +75,9 @@ export async function listArticles(userId: string) {
   }
 }
 
+/**
+ * 获取文章内容
+ */
 export async function getArticleContent(key: string): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: BUCKET_NAME,
@@ -91,6 +94,9 @@ export async function getArticleContent(key: string): Promise<string> {
   }
 }
 
+/**
+ * 删除文章
+ */
 export async function deleteArticle(key: string) {
   const command = new DeleteObjectCommand({
     Bucket: BUCKET_NAME,
