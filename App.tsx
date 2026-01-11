@@ -16,7 +16,6 @@ import {
   Save,
   Share2,
   Plus,
-  File,
   Calendar,
   LayoutGrid
 } from 'lucide-react';
@@ -36,7 +35,7 @@ const App: React.FC = () => {
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
 
-  // === 视图控制 ===
+  // 视图控制: 'list' | 'create'
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
 
   // R2 相关状态
@@ -48,10 +47,11 @@ const App: React.FC = () => {
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  // 初始化：加载列表，检查 URL
   useEffect(() => {
+    // 1. 初始加载列表
     loadHistory();
 
+    // 2. 检查 URL ID
     const checkUrlForArticle = async () => {
       const params = new URLSearchParams(window.location.search);
       const articleId = params.get('id');
@@ -65,13 +65,15 @@ const App: React.FC = () => {
             setOutputText(content);
             setCurrentArticleKey(articleId);
 
-            const simpleName = articleId.split('_').slice(1).join('_').replace('.md', '') || 'Shared Article';
+            // 解析文件名用于显示
+            // 格式: articles/user/timestamp_Title.md
+            // 逻辑: 取文件名 -> 去掉.md -> 按_分割 -> 取第2部分及以后 -> 拼回字符串
+            const rawName = articleId.split('/').pop() || '';
+            const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Shared Article';
             setFileName(simpleName);
 
             setStatus(AppStatus.SUCCESS);
             setProcessStatus("加载完成");
-
-            // === 修复点：URL加载文章后，强制滚动到顶部 ===
             window.scrollTo(0, 0);
           } else {
             throw new Error("未找到文章内容");
@@ -114,9 +116,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [status]);
 
-  // === 修复点：滚动逻辑优化 ===
-  // 仅在 LOADING 状态（生成中）且有新内容时自动滚动到底部
-  // 移除对 SUCCESS 状态的监听，防止点击历史文章时跳到底部
   useEffect(() => {
     if (status === AppStatus.LOADING) {
       outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -142,7 +141,6 @@ const App: React.FC = () => {
 
     let nameClean = file.name.replace(/\.[^.]+$/, "");
     nameClean = nameClean.replace(/\.(en|zh|zh-CN|us|uk|jp|kr)$/i, "");
-
     setFileName(nameClean);
 
     const reader = new FileReader();
@@ -208,16 +206,26 @@ const App: React.FC = () => {
     }
   };
 
+  // === 核心修复：正确传递标题给 uploadToR2 ===
   const handleSaveToCloud = async () => {
     if (!outputText) return;
     setIsSaving(true);
     try {
+      // 1. 尝试从正文 H1 获取标题
+      const titleMatch = outputText.match(/^#+\s+(.*)/m);
+      // 2. 如果没有 H1，使用文件名
+      let title = titleMatch ? titleMatch[1].trim() : (fileName || "Untitled");
+
+      // 去除标题中的 Markdown 标记 (如加粗 **text**)
+      title = title.replace(/[*_~`]/g, '');
+
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
       if (!localStorage.getItem('sub2article_user_id')) {
           localStorage.setItem('sub2article_user_id', userId);
       }
 
-      const savedKey = await uploadToR2(outputText, userId);
+      // 调用更新后的 uploadToR2 (content, title, userId)
+      const savedKey = await uploadToR2(outputText, title, userId);
 
       setCurrentArticleKey(savedKey);
       updateUrlWithId(savedKey);
@@ -244,13 +252,12 @@ const App: React.FC = () => {
       setCurrentArticleKey(key);
       updateUrlWithId(key);
 
-      const simpleName = key.split('/').pop()?.replace('.md', '') || 'Article';
+      const rawName = key.split('/').pop() || '';
+      const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Article';
       setFileName(simpleName);
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("加载完成");
-
-      // === 修复点：点击列表加载文章后，强制滚动到顶部 ===
       window.scrollTo(0, 0);
 
     } catch (e) {
@@ -341,12 +348,8 @@ const App: React.FC = () => {
 
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
-
-                {/* === 修改点：移除了这里的“状态提示条” === */}
-
                 {outputText && (
                   <>
-                    {/* 分享按钮 */}
                     {currentArticleKey && (
                       <button
                         onClick={handleShare}
@@ -357,7 +360,6 @@ const App: React.FC = () => {
                       </button>
                     )}
 
-                     {/* === 修改点：保存按钮仅在未保存状态下显示 === */}
                     {!currentArticleKey && (
                       <button
                         onClick={handleSaveToCloud}
@@ -375,7 +377,6 @@ const App: React.FC = () => {
                       </button>
                     )}
 
-                    {/* 复制按钮保留 */}
                     <button
                       onClick={copyForNotion}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all text-xs font-bold border border-transparent font-['Inter']"
@@ -383,8 +384,6 @@ const App: React.FC = () => {
                       {notionCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                       {notionCopied ? '已复制' : '复制'}
                     </button>
-
-                    {/* === 修改点：移除了下载按钮 === */}
                   </>
                 )}
 
@@ -434,7 +433,10 @@ const App: React.FC = () => {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {historyList.map((item) => {
-                        const displayName = item.Key.split('/').pop()?.replace('.md', '').split('_').slice(1).join('_') || '无标题文章';
+                        // 列表显示逻辑：从文件名反解标题
+                        const rawName = item.Key.split('/').pop() || '';
+                        // 假设格式为 timestamp_Title.md，用 split('_') 分割，取后半部分
+                        const displayName = rawName.replace('.md', '').split('_').slice(1).join(' ') || '无标题文章';
                         const date = new Date(item.LastModified).toLocaleDateString();
 
                         return (
