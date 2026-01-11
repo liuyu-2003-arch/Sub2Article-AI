@@ -1,11 +1,6 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
 // === 增强版 Prompt ===
-// 核心改动：
-// 1. 引入 "Block" 概念，强迫 AI 将内容视为一个个独立的块来处理，防止格式跑偏。
-// 2. 增加了 Negative Constraints (负向约束) 来禁止列表符号。
-// 3. 明确了“结尾信号”，确保总结一定会出现。
-
 const BASE_PROMPT = `你是一个专业的字幕整理与翻译助手。你的任务是将杂乱的语音识别文本重组为一篇格式完美的【英中对照】文章。
 
 【处理流程】：
@@ -31,7 +26,10 @@ const BASE_PROMPT = `你是一个专业的字幕整理与翻译助手。你的�
   当所有正文内容处理完毕后，必须：
   1. 输出一个分隔线：---
   2. 输出二级标题：## 文章总结
-  3. 用中文列出 3-5 点核心内容摘要（此处可以使用列表符号）。
+  3. 用中文列出 3-5 点核心内容摘要。
+  4. 输出一个分隔线：---
+  5. 输出二级标题：## 关联阅读
+  6. 根据文章内容，推荐 3 个相关的延伸阅读话题或书籍名称（仅列出名称即可）。
 
 【示例】：
 The longest study on happiness has shown that deep relationships are key to our well-being. It's not about money or fame, but about the connections we build.
@@ -52,7 +50,10 @@ const CONTINUE_PROMPT_TEMPLATE = `我正在整理视频字幕，之前的生成�
 3. **检查结尾**：如果原文内容已全部处理完，**必须**在最后生成：
    ---
    ## 文章总结
-   (3-5点总结内容)
+   (3-5点总结)
+   ---
+   ## 关联阅读
+   (3个相关话题)
 
 【输入数据】：`;
 
@@ -74,10 +75,16 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
   if (title) {
     finalPrompt += `\n
 【标题任务】：
-文章开头请先输出一级标题的中文翻译，使用二级标题格式 (## )，例如：
-## ${title} (中文翻译)
+系统已生成英文主标题（H1）："${title}"。
+**你的第一个任务是**：
+1. 立即输出该标题的**纯中文翻译**（不要包含英文原文），使用二级标题 (## ) 格式。
+2. 在中文副标题后，立即输出一个分隔线 "---"。
+3. 然后开始正文整理。
 
-然后直接开始正文整理。
+示例结构：
+## 这里是纯中文的翻译标题
+---
+(开始正文...)
 `;
   } else {
     finalPrompt += `\n【注意】：直接开始整理正文内容。`;
@@ -88,7 +95,7 @@ export async function* processSubtitleToArticleStream(text: string, title: strin
       model: 'gemini-2.0-flash',
       contents: `${finalPrompt}\n\n待处理文字如下：\n---\n${text}`,
       config: {
-        temperature: 0.1, // 低温度保持格式稳定
+        temperature: 0.1,
         topP: 0.95,
         topK: 40,
       },
@@ -117,7 +124,6 @@ export async function* continueProcessingStream(originalText: string, currentOut
   }
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // 截取更多上下文以确保格式连贯，但不要太长以免占用 token
   const lastPart = currentOutput.slice(-1000);
 
   try {

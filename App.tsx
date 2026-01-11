@@ -58,8 +58,13 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-    setFileName(nameWithoutExt);
+    // === 修改点：更彻底地清理文件名后缀 ===
+    // 1. 去除文件扩展名 (.srt, .txt 等)
+    // 2. 去除语言标记 (.en, .zh, .zh-CN 等)
+    let nameClean = file.name.replace(/\.[^.]+$/, "");
+    nameClean = nameClean.replace(/\.(en|zh|zh-CN|us|uk|jp|kr)$/i, "");
+
+    setFileName(nameClean);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -72,7 +77,8 @@ const App: React.FC = () => {
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
-    const initialText = fileName ? `# ${fileName}\n\n` : '';
+    // H1 由前端生成，Gemini 负责生成紧随其后的 H2 和正文
+    const initialText = fileName ? `# ${fileName}\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
     setProcessStatus("准备开始...");
@@ -214,8 +220,6 @@ const App: React.FC = () => {
                 </button>
               </div>
             )}
-
-            {/* 这里的地球仪图标已移除，移动到底部 */}
           </div>
         </div>
       </header>
@@ -224,8 +228,6 @@ const App: React.FC = () => {
         {status === AppStatus.IDLE ? (
           <div className="space-y-10 animate-in fade-in zoom-in-95 duration-700 mt-8">
             <div className="text-center space-y-4">
-              {/* 这里的 Powered by Gemini 徽标已移除，移动到底部 */}
-
               <h2 className="text-4xl font-black text-slate-900 tracking-tight sm:text-6xl font-['Playfair_Display']">
                 Turn Subtitles into <br/>
                 <span className="text-slate-500 italic">Beautiful Articles</span>
@@ -315,11 +317,18 @@ const App: React.FC = () => {
                     prose prose-stone max-w-none
                     prose-lg
                     prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900
-                    prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-8 prose-h1:text-left
-                    prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-6 prose-h2:text-left
+
+                    /* H1 样式：紧凑下边距 */
+                    prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left
+
+                    /* H2 样式：用作副标题，紧凑上边距，灰色，稍微小一点 */
+                    prose-h2:text-2xl prose-h2:mt-1 prose-h2:mb-8 prose-h2:text-left prose-h2:text-slate-500 prose-h2:font-normal
+
+                    /* 分隔线样式 */
+                    prose-hr:my-10 prose-hr:border-slate-200
+
                     prose-p:font-['Merriweather'] prose-p:text-slate-800 prose-p:leading-loose prose-p:mb-6
                     prose-strong:font-bold prose-strong:text-slate-900
-                    prose-hr:my-12 prose-hr:border-slate-200
                   ">
                     {outputText ? (
                       <div>
@@ -354,7 +363,6 @@ const App: React.FC = () => {
 
       <footer className="py-8 px-6 border-t border-slate-200 mt-auto bg-white font-['Inter']">
         <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-             {/* 左侧：Logo 和 地球仪链接 */}
              <div className="flex items-center gap-4 text-sm text-slate-500">
                <span className="font-bold text-slate-900">Sub2Article AI</span>
                <span className="w-px h-3 bg-slate-300"></span>
@@ -364,7 +372,6 @@ const App: React.FC = () => {
                </a>
              </div>
 
-             {/* 右侧：Powered by Gemini 徽标 */}
              <div className="flex items-center gap-4">
                 <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold tracking-wide uppercase">
                   <Zap className="w-3 h-3 fill-slate-700" /> Powered by Gemini
