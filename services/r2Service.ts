@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
-// R2 Configuration
+// R2 Configuration (保持不变)
 const R2_ENDPOINT = "https://dd0afffd8fff1c8846db83bc10e2aa1f.r2.cloudflarestorage.com";
 const BUCKET_NAME = "sub2article";
 const ACCESS_KEY_ID = "566ba62b3c26a6a81ba2246147c2dd29";
@@ -18,27 +18,30 @@ const s3Client = new S3Client({
 
 /**
  * 上传文章到 R2
- * 格式变更为: articles/English_Title_20260116120000.md
+ * 目标格式: articles/The_English_Title_20260116123000.md
  */
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
-  // 1. 生成紧凑时间戳 (YYYYMMDDHHmmss)
+  // 1. 生成紧凑的时间戳 (YYYYMMDDHHmmss)
   const now = new Date();
   const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14);
 
-  // 2. 过滤标题：只保留英文、数字、空格，去除中文和特殊符号
-  // 目的：让 URL 变成纯英文
-  let safeTitle = title.replace(/[^\w\s-]/g, "");
-  safeTitle = safeTitle.replace(/\s+/g, "_"); // 空格转下划线
+  // 2. 这里的 title 可能是 "English Title 中文标题"
+  // 我们只提取英文部分用于文件名，以保证 URL 纯净
+  let safeTitle = title.replace(/[\u4e00-\u9fa5]/g, ""); // 去除中文
+  safeTitle = safeTitle.replace(/[^\w\s-]/g, ""); // 去除特殊符号
+  safeTitle = safeTitle.trim().replace(/\s+/g, "_"); // 空格转下划线
   safeTitle = safeTitle.replace(/_+/g, "_"); // 去除重复下划线
-  safeTitle = safeTitle.replace(/^_|_$/g, ""); // 去除首尾下划线
 
-  // 如果全是中文导致过滤后为空，给个默认名
-  if (!safeTitle) safeTitle = "Untitled_Article";
+  // 如果提取英文为空（比如原标题全是中文），则使用 "Article"
+  if (!safeTitle || safeTitle.length < 2) {
+      safeTitle = "Article";
+  }
 
   // 限制长度
-  safeTitle = safeTitle.substring(0, 100);
+  safeTitle = safeTitle.substring(0, 80);
 
-  // 3. 组合文件名：英文标题 + 下划线 + 紧凑时间戳
+  // 3. 拼接最终文件名：articles/Title_Timestamp.md
+  // 注意：这里去掉了 userId 目录层级，直接放在 articles/ 下，为了短链接
   const fileName = `articles/${safeTitle}_${timestamp}.md`;
 
   const command = new PutObjectCommand({
@@ -59,7 +62,8 @@ export async function uploadToR2(content: string, title: string, userId: string)
 }
 
 /**
- * 获取文章列表 (保持不变，但范围改为 articles/)
+ * 获取文章列表
+ * 搜索范围：articles/
  */
 export async function listArticles(userId: string) {
   const prefix = `articles/`;
@@ -80,39 +84,25 @@ export async function listArticles(userId: string) {
   }
 }
 
-/**
- * 获取文章内容
- */
+// ... getArticleContent 和 deleteArticle 保持原样 ...
 export async function getArticleContent(key: string): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: BUCKET_NAME,
     Key: key,
   });
-
   try {
     const response = await s3Client.send(command);
-    const body = await response.Body?.transformToString();
-    return body || "";
+    return await response.Body?.transformToString() || "";
   } catch (error) {
-    console.error("Failed to fetch article content from R2:", error);
-    throw error;
+    console.error(error); throw error;
   }
 }
 
-/**
- * 删除文章
- */
 export async function deleteArticle(key: string) {
   const command = new DeleteObjectCommand({
     Bucket: BUCKET_NAME,
     Key: key,
   });
-
-  try {
-    await s3Client.send(command);
-    console.log(`Article deleted: ${key}`);
-  } catch (error) {
-    console.error("Failed to delete article from R2:", error);
-    throw error;
-  }
+  try { await s3Client.send(command); }
+  catch (error) { console.error(error); throw error; }
 }

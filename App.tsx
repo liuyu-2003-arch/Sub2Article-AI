@@ -7,6 +7,53 @@ import { processSubtitleToArticleStream, continueProcessingStream } from './serv
 import { uploadToR2, listArticles, getArticleContent, deleteArticle } from './services/r2Service';
 import { AppStatus } from './types';
 
+// === 新增辅助函数：处理显示逻辑 ===
+// 目的：从混乱的文件名中提取干净的英文标题、中文副标题、以及格式化日期
+const extractDisplayInfo = (key: string, lastModified: Date) => {
+  // 1. 去除路径前缀 (articles/xxx/ or articles/)
+  let cleanName = key.split('/').pop() || '';
+  cleanName = cleanName.replace('.md', '');
+
+  let displayTitle = "";
+  let displaySubTitle = ""; // 尝试找回中文部分
+
+  // === 识别文件名格式 ===
+
+  // 情况 A: 新格式 (Title_Here_20260116120000) - 时间戳在后
+  const newFormatMatch = cleanName.match(/^(.*)_(\d{14})$/);
+
+  // 情况 B: 旧格式 (2026-01-11T..._Title) - 时间戳在前
+  const oldFormatMatch = cleanName.match(/^\d{4}-\d{2}-\d{2}T[\d-]+\w+_(.*)$/);
+
+  if (newFormatMatch) {
+     // 新格式：文件名本身就是纯英文标题
+     displayTitle = newFormatMatch[1].replace(/_/g, ' ');
+  } else if (oldFormatMatch) {
+     // 旧格式：文件名可能包含 "English_Text_中文内容"
+     let rawTitle = oldFormatMatch[1];
+     rawTitle = rawTitle.replace(/_/g, ' ');
+
+     // 尝试分离中文和英文
+     const chineseIndex = rawTitle.search(/[\u4e00-\u9fa5]/);
+     if (chineseIndex > 0) {
+        displayTitle = rawTitle.substring(0, chineseIndex).trim();
+        displaySubTitle = rawTitle.substring(chineseIndex).trim();
+     } else {
+        displayTitle = rawTitle;
+     }
+  } else {
+     // 无法识别的格式，直接去下划线显示
+     displayTitle = cleanName.replace(/_/g, ' ');
+  }
+
+  return {
+    title: displayTitle,
+    subTitle: displaySubTitle,
+    date: lastModified.toLocaleDateString() + ' ' + lastModified.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+  };
+};
+
+
 const App: React.FC = () => {
   const [inputText, setInputText] = useState<string>('');
   const [outputText, setOutputText] = useState<string>('');
@@ -17,38 +64,13 @@ const App: React.FC = () => {
   const [linkCopied, setLinkCopied] = useState<boolean>(false);
   const [processStatus, setProcessStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
-
   const [viewMode, setViewMode] = useState<'list' | 'create'>('list');
-
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [historyList, setHistoryList] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentArticleKey, setCurrentArticleKey] = useState<string | null>(null);
-
   const outputEndRef = useRef<HTMLDivElement>(null);
-
-  // === 核心修改：解析文件名为纯净标题 ===
-  const parseCleanTitle = (filename: string) => {
-    let cleanName = filename.replace('.md', '');
-
-    // 1. 处理新格式：Title_Here_20260116001523 (时间戳在后)
-    // 匹配末尾的 14 位数字时间戳
-    const newFormatMatch = cleanName.match(/^(.*)_(\d{14})$/);
-    if (newFormatMatch) {
-      // 返回第一组（标题部分），并把下划线换回空格
-      return newFormatMatch[1].replace(/_/g, ' ');
-    }
-
-    // 2. 处理旧格式：2026-01-11T..._Title_Here (时间戳在前)
-    // 移除 ISO 时间戳前缀
-    cleanName = cleanName.replace(/^\d{4}-\d{2}-\d{2}T[\d-]+\w+_/, '');
-
-    // 移除旧版可能存在的 userId 目录名干扰
-    cleanName = cleanName.split('/').pop() || cleanName;
-
-    return cleanName.replace(/_/g, ' ');
-  };
 
   useEffect(() => {
     loadHistory();
@@ -58,8 +80,8 @@ const App: React.FC = () => {
       let articleId = params.get('id');
 
       if (articleId) {
-        // === 核心修改：URL 还原逻辑 ===
-        // 如果 ID 是 Life_is_Short_20260116.html，还原为 articles/Life_is_Short_20260116.md
+        // === 核心修复：URL 解析 ===
+        // 如果 URL 是 ?id=My_Life_2026.html，我们需要找到 articles/My_Life_2026.md
         if (!articleId.startsWith('articles/')) {
             const realKey = articleId.replace(/\.html$/, '.md');
             articleId = `articles/${realKey}`;
@@ -73,9 +95,9 @@ const App: React.FC = () => {
             setOutputText(content);
             setCurrentArticleKey(articleId);
 
-            // 使用解析函数获取干净的标题
-            const rawName = articleId.split('/').pop() || '';
-            setFileName(parseCleanTitle(rawName));
+            // 解析标题用于页面 title 显示
+            const info = extractDisplayInfo(articleId, new Date());
+            setFileName(info.title);
 
             setStatus(AppStatus.SUCCESS);
             setProcessStatus("加载完成");
@@ -85,7 +107,7 @@ const App: React.FC = () => {
           }
         } catch (e) {
           console.error(e);
-          setError("无法加载该文章，链接可能已失效。");
+          setError("无法加载该文章，可能链接已失效或被删除。");
           setStatus(AppStatus.ERROR);
         }
       }
@@ -93,13 +115,12 @@ const App: React.FC = () => {
     checkUrlForArticle();
   }, []);
 
-  // === 核心修改：生成 .html 结尾的短链接 ===
+  // === 核心修复：生成短链接 ===
   const updateUrlWithId = (key: string | null) => {
     if (key) {
-      // key 是 articles/Title_Timestamp.md
-      // 提取文件名部分
+      // Input: articles/My_Title_Timestamp.md
+      // Output: My_Title_Timestamp.html
       const shortName = key.split('/').pop()?.replace('.md', '') || 'article';
-      // 构造成 .html 伪静态地址
       const shortUrlParam = `${shortName}.html`;
 
       const newUrl = `${window.location.pathname}?id=${encodeURIComponent(shortUrlParam)}`;
@@ -110,7 +131,7 @@ const App: React.FC = () => {
     }
   };
 
-  // ... (进度条 useEffect 保持不变) ...
+  // ... 进度条逻辑保持不变 ...
   useEffect(() => {
     let interval: number;
     if (status === AppStatus.LOADING) {
@@ -151,23 +172,15 @@ const App: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    let nameClean = file.name.replace(/\.[^.]+$/, "");
-    nameClean = nameClean.replace(/\.(en|zh|zh-CN|us|uk|jp|kr)$/i, "");
+    let nameClean = file.name.replace(/\.[^.]+$/, "").replace(/\.(en|zh|zh-CN|us|uk|jp|kr)$/i, "");
     setFileName(nameClean);
-
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      setInputText(content || "");
-    };
+    reader.onload = (event) => setInputText((event.target?.result as string) || "");
     reader.readAsText(file);
   };
 
   const handleProcess = async () => {
     if (!inputText.trim()) return;
-
-    // 初始显示
     const initialText = fileName ? `# ${fileName}\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
@@ -181,27 +194,20 @@ const App: React.FC = () => {
       let currentFullText = initialText;
       let isFullyComplete = false;
       let loopCount = 0;
-      const MAX_LOOPS = 15;
-
       let stream = processSubtitleToArticleStream(inputText, fileName || '');
 
-      while (!isFullyComplete && loopCount < MAX_LOOPS) {
+      while (!isFullyComplete && loopCount < 15) {
         loopCount++;
         let hasReceivedChunk = false;
-
         for await (const chunk of stream) {
-          if (!hasReceivedChunk && chunk.text) {
-             hasReceivedChunk = true;
-             setProcessStatus("正在生成");
-          }
+          if (!hasReceivedChunk && chunk.text) { hasReceivedChunk = true; setProcessStatus("正在生成"); }
           currentFullText += chunk.text;
           setOutputText(currentFullText);
           isFullyComplete = chunk.isComplete;
         }
-
         if (!isFullyComplete) {
-           if (loopCount >= MAX_LOOPS) break;
-           setProcessStatus("内容较长，自动续写中");
+           if (loopCount >= 15) break;
+           setProcessStatus("自动续写中...");
            currentFullText += "\n\n";
            stream = continueProcessingStream(inputText, currentFullText);
         }
@@ -209,12 +215,10 @@ const App: React.FC = () => {
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("整理完成");
-
       await performAutoSave(currentFullText);
-
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "处理过程中发生错误，请稍后重试。");
+      setError(err.message || "处理错误");
       setStatus(AppStatus.ERROR);
     }
   };
@@ -222,24 +226,25 @@ const App: React.FC = () => {
   const performAutoSave = async (textToSave: string) => {
     setIsSaving(true);
     try {
-      // 提取标题逻辑
+      // 1. 提取 H1 (通常是英文标题)
       const h1Match = textToSave.match(/^#\s+(.+)$/m);
       const h1 = h1Match ? h1Match[1].trim().replace(/[*_~`]/g, '') : '';
 
-      // 注意：现在文件名主要依赖 H1 (英文标题)，以便生成干净的 URL
-      // 中文标题 (H2) 虽然提取，但主要用于正文显示，不强制放入文件名，以免 URL 变长变乱
-      const fullTitle = h1 || fileName || "Untitled";
+      // 2. 提取 H2 (通常是中文标题) - 这里提取出来为了组合完整 Title 给 R2 Service
+      const h2Match = textToSave.match(/^##\s*(.+)$/m);
+      const h2 = h2Match ? h2Match[1].trim().replace(/[*_~`]/g, '') : '';
+
+      // 组合：R2Service 会自动只保留英文部分做文件名，但我们传入全名以防万一
+      let fullTitle = h1 || fileName || "Untitled";
+      if (h1 && h2) fullTitle = `${h1} ${h2}`;
 
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
-      if (!localStorage.getItem('sub2article_user_id')) {
-          localStorage.setItem('sub2article_user_id', userId);
-      }
 
-      // 上传 (R2Service 会自动处理成 English_Title_Timestamp 格式)
+      // 保存
       const savedKey = await uploadToR2(textToSave, fullTitle, userId);
 
       setCurrentArticleKey(savedKey);
-      updateUrlWithId(savedKey);
+      updateUrlWithId(savedKey); // 更新为 .html 短链接
       setSaveSuccess(true);
       loadHistory();
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -250,22 +255,19 @@ const App: React.FC = () => {
     }
   };
 
-  const handleManualSave = async () => {
-    if (outputText) await performAutoSave(outputText);
-  };
+  const handleManualSave = async () => { if (outputText) await performAutoSave(outputText); };
 
   const handleLoadArticle = async (key: string) => {
     try {
       setStatus(AppStatus.LOADING);
-      setProcessStatus("正在加载文章...");
-
+      setProcessStatus("正在加载...");
       const content = await getArticleContent(key);
       setOutputText(content);
       setCurrentArticleKey(key);
-      updateUrlWithId(key);
+      updateUrlWithId(key); // 点击历史记录也变为短链接
 
-      const rawName = key.split('/').pop() || '';
-      setFileName(parseCleanTitle(rawName));
+      const info = extractDisplayInfo(key, new Date());
+      setFileName(info.title);
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("加载完成");
@@ -277,57 +279,40 @@ const App: React.FC = () => {
   };
 
   const handleShare = () => {
-    if (!currentArticleKey) { alert("请先保存文章再分享"); return; }
+    if (!currentArticleKey) { alert("请先保存"); return; }
     navigator.clipboard.writeText(window.location.href).then(() => {
-        setLinkCopied(true);
-        setTimeout(() => setLinkCopied(false), 2000);
+        setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000);
     });
   };
 
   const handleDeleteArticle = async (e: React.MouseEvent, key: string) => {
     e.stopPropagation();
-    if (confirm("确定要删除这篇文章吗？")) {
+    if (confirm("确定要删除吗？")) {
       await deleteArticle(key);
-      if (key === currentArticleKey) {
-        updateUrlWithId(null);
-        setCurrentArticleKey(null);
-        reset();
-      }
+      if (key === currentArticleKey) { reset(); }
       loadHistory();
     }
   };
 
   const reset = () => {
-    setStatus(AppStatus.IDLE);
-    setViewMode('list');
-    setOutputText('');
-    setFileName('');
-    setError(null);
-    setProcessStatus('');
-    setProgress(0);
-    setSaveSuccess(false);
-    setCurrentArticleKey(null);
-    updateUrlWithId(null);
-    loadHistory();
+    setStatus(AppStatus.IDLE); setViewMode('list'); setOutputText(''); setFileName(''); setError(null);
+    setProcessStatus(''); setProgress(0); setSaveSuccess(false); setCurrentArticleKey(null);
+    updateUrlWithId(null); loadHistory();
   };
 
   const goCreate = () => {
-      setStatus(AppStatus.IDLE);
-      setViewMode('create');
-      setOutputText('');
-      setFileName('');
-      updateUrlWithId(null);
+      setStatus(AppStatus.IDLE); setViewMode('create'); setOutputText(''); setFileName(''); updateUrlWithId(null);
   };
 
   const copyForNotion = () => {
     navigator.clipboard.writeText(outputText).then(() => {
-      setNotionCopied(true);
-      setTimeout(() => setNotionCopied(false), 2000);
+      setNotionCopied(true); setTimeout(() => setNotionCopied(false), 2000);
     });
   };
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-slate-200 selection:text-slate-900">
+      {/* Header */}
       <header className="bg-white/95 backdrop-blur-sm border-b border-slate-200 py-3 px-4 md:px-6 sticky top-0 z-50 transition-all">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-4">
@@ -340,18 +325,12 @@ const App: React.FC = () => {
               </span>
             </button>
           </div>
-
           <div className="flex items-center gap-3">
              {viewMode === 'list' && status === AppStatus.IDLE && (
-                <button
-                  onClick={goCreate}
-                  className="bg-slate-900 text-white hover:bg-slate-800 px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 font-['Inter'] shadow-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span className="hidden sm:inline">添加文章</span>
+                <button onClick={goCreate} className="bg-slate-900 text-white hover:bg-slate-800 px-3 py-1.5 rounded-lg transition-all text-xs font-bold flex items-center gap-1.5 font-['Inter'] shadow-sm">
+                  <Plus className="w-4 h-4" /> <span className="hidden sm:inline">添加文章</span>
                 </button>
              )}
-
             {status !== AppStatus.IDLE && (
               <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
                 {outputText && (
@@ -375,9 +354,8 @@ const App: React.FC = () => {
                   </>
                 )}
                 <div className="h-4 w-px bg-slate-200 mx-1" />
-                <button onClick={reset} className="text-slate-400 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 font-['Inter']" title="返回列表">
-                  <ArrowRight className="w-3.5 h-3.5 rotate-180" />
-                  <span className="hidden sm:inline">返回列表</span>
+                <button onClick={reset} className="text-slate-400 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-all text-xs font-semibold flex items-center gap-1.5 font-['Inter']">
+                  <ArrowRight className="w-3.5 h-3.5 rotate-180" /> <span className="hidden sm:inline">返回列表</span>
                 </button>
               </div>
             )}
@@ -395,20 +373,15 @@ const App: React.FC = () => {
                   ) : historyList.length === 0 ? (
                     <div className="text-center py-24 bg-white rounded-2xl border border-dashed border-slate-200">
                       <h3 className="text-lg font-bold text-slate-700 font-['Inter']">暂无文章</h3>
-                      <p className="text-slate-400 text-sm mt-2 mb-6">您还没有保存任何整理后的文章</p>
-                      <button onClick={goCreate} className="px-5 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-colors inline-flex items-center gap-2">
+                      <button onClick={goCreate} className="px-5 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-colors inline-flex items-center gap-2 mt-4">
                         <Plus className="w-4 h-4" /> 开始第一篇创作
                       </button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-4">
                       {historyList.map((item) => {
-                        const rawName = item.Key.split('/').pop() || '';
-
-                        // === 核心修改：使用统一的标题解析函数 ===
-                        const displayName = parseCleanTitle(rawName);
-
-                        const date = new Date(item.LastModified).toLocaleDateString();
+                        // === 核心逻辑：渲染列表卡片 ===
+                        const info = extractDisplayInfo(item.Key, item.LastModified);
 
                         return (
                           <div
@@ -417,13 +390,21 @@ const App: React.FC = () => {
                             className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:border-slate-200 transition-all cursor-pointer relative flex flex-col justify-start"
                           >
                              <div className="flex-1 min-w-0 pr-8">
+                               {/* 英文主标题 */}
                                <h3 className="text-xl font-bold text-slate-900 mb-1 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors line-clamp-2">
-                                 {displayName}
+                                 {info.title}
                                </h3>
+
+                               {/* 中文副标题（如果有） */}
+                               {info.subTitle && (
+                                 <p className="text-base text-slate-500 font-['Noto_Sans_SC'] mt-1 line-clamp-1">
+                                   {info.subTitle}
+                                 </p>
+                               )}
 
                                <div className="flex items-center gap-2 text-xs text-slate-400 font-['Inter'] mt-3">
                                  <Calendar className="w-3.5 h-3.5" />
-                                 <span>{date}</span>
+                                 <span>{info.date}</span>
                                </div>
                              </div>
 
@@ -441,26 +422,21 @@ const App: React.FC = () => {
                   )}
                </div>
             )}
-
+            {/* Create Mode */}
             {viewMode === 'create' && (
               <div className="animate-in fade-in zoom-in-95 duration-700 mt-4">
                 <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 p-2 overflow-hidden transition-all hover:shadow-2xl hover:shadow-slate-200/80">
                   <div className="bg-slate-50 rounded-xl p-8 space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-900 rounded-lg text-white">
-                          <FileText className="w-4 h-4" />
-                        </div>
-                        <h3 className="font-bold text-slate-800 font-['Inter']">
-                          输入转录文本
-                        </h3>
+                        <div className="p-2 bg-slate-900 rounded-lg text-white"><FileText className="w-4 h-4" /></div>
+                        <h3 className="font-bold text-slate-800 font-['Inter']">输入转录文本</h3>
                       </div>
                       <label className="group cursor-pointer bg-white hover:bg-slate-900 border border-slate-200 hover:border-slate-900 px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 shadow-sm text-slate-600 hover:text-white font-['Inter']">
                         <Upload className="w-3.5 h-3.5 transition-transform group-hover:-translate-y-0.5" /> 导入文件
                         <input type="file" className="hidden" accept=".txt,.srt" onChange={handleFileUpload} />
                       </label>
                     </div>
-
                     <div className="relative group">
                       <textarea
                         className="w-full h-64 p-6 rounded-xl border border-slate-200 focus:border-slate-400 focus:ring-0 resize-none bg-white text-slate-700 leading-relaxed transition-all outline-none text-base placeholder:text-slate-300 font-['Merriweather']"
@@ -469,21 +445,11 @@ const App: React.FC = () => {
                         onChange={(e) => setInputText(e.target.value)}
                       />
                       {fileName && (
-                        <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold border border-emerald-100 animate-in fade-in slide-in-from-top-2 font-['Inter']">
-                          <Check className="w-3 h-3" />
-                          {fileName}
-                        </div>
+                        <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[10px] font-bold border border-emerald-100 animate-in fade-in slide-in-from-top-2 font-['Inter']"><Check className="w-3 h-3" /> {fileName}</div>
                       )}
                     </div>
-
-                    <button
-                      onClick={handleProcess}
-                      disabled={!inputText.trim()}
-                      className={`group w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.99] font-['Inter'] ${!inputText.trim() ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/20'}`}
-                    >
-                      <Sparkles className={`w-4 h-4 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} />
-                      开启智能整理
-                      <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    <button onClick={handleProcess} disabled={!inputText.trim()} className={`group w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.99] font-['Inter'] ${!inputText.trim() ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-900/20'}`}>
+                      <Sparkles className={`w-4 h-4 ${inputText.trim() ? 'group-hover:animate-spin' : ''}`} /> 开启智能整理 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                     </button>
                   </div>
                 </div>
@@ -496,9 +462,7 @@ const App: React.FC = () => {
               <div>
                 {status === AppStatus.ERROR && !outputText ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-                    <div className="bg-red-50 p-4 rounded-full text-red-500">
-                      <AlertCircle className="w-10 h-10" />
-                    </div>
+                    <div className="bg-red-50 p-4 rounded-full text-red-500"><AlertCircle className="w-10 h-10" /></div>
                     <div className="space-y-2 font-['Inter']">
                       <p className="text-lg font-bold text-slate-900">处理遇到障碍</p>
                       <p className="text-slate-500 text-sm max-w-xs mx-auto">{error}</p>
@@ -506,37 +470,11 @@ const App: React.FC = () => {
                     <button onClick={handleProcess} className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-indigo-700 transition-all text-sm font-['Inter']">重新尝试</button>
                   </div>
                 ) : (
-                  <article className="
-                    prose prose-stone max-w-none
-                    prose-lg
-                    prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900
-                    prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left
-                    prose-h2:text-2xl prose-h2:mt-1 prose-h2:mb-8 prose-h2:text-left prose-h2:text-slate-500 prose-h2:font-normal
-                    prose-hr:my-10 prose-hr:border-slate-200
-                    prose-p:font-['Merriweather'] prose-p:text-slate-800 prose-p:leading-loose prose-p:mb-6
-                    prose-strong:font-bold prose-strong:text-slate-900
-                  ">
+                  <article className="prose prose-stone max-w-none prose-lg prose-headings:font-['Playfair_Display'] prose-headings:font-bold prose-headings:text-slate-900 prose-h1:text-4xl prose-h1:leading-tight prose-h1:mb-2 prose-h1:text-left prose-h2:text-2xl prose-h2:mt-1 prose-h2:mb-8 prose-h2:text-left prose-h2:text-slate-500 prose-h2:font-normal prose-hr:my-10 prose-hr:border-slate-200 prose-p:font-['Merriweather'] prose-p:text-slate-800 prose-p:leading-loose prose-p:mb-6 prose-strong:font-bold prose-strong:text-slate-900">
                     {outputText ? (
-                      <div>
-                        <ReactMarkdown>{outputText}</ReactMarkdown>
-                        {status === AppStatus.LOADING && (
-                          <div className="flex items-center gap-3 mt-8 opacity-60">
-                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                            <span className="text-sm font-['Inter'] text-slate-500 italic ml-2">Writing...</span>
-                          </div>
-                        )}
-                      </div>
+                      <div><ReactMarkdown>{outputText}</ReactMarkdown>{status === AppStatus.LOADING && (<div className="flex items-center gap-3 mt-8 opacity-60"><span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span><span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span><span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span><span className="text-sm font-['Inter'] text-slate-500 italic ml-2">Writing...</span></div>)}</div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-32 gap-8 opacity-50">
-                         <div className="w-16 h-1 bg-slate-200 rounded-full animate-pulse"></div>
-                         <div className="space-y-4 w-full max-w-md text-center">
-                            <p className="font-['Playfair_Display'] text-2xl text-slate-400 italic">
-                              Thinking...
-                            </p>
-                         </div>
-                      </div>
+                      <div className="flex flex-col items-center justify-center py-32 gap-8 opacity-50"><div className="w-16 h-1 bg-slate-200 rounded-full animate-pulse"></div><div className="space-y-4 w-full max-w-md text-center"><p className="font-['Playfair_Display'] text-2xl text-slate-400 italic">Thinking...</p></div></div>
                     )}
                     <div ref={outputEndRef} />
                   </article>
@@ -546,23 +484,14 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
-
+      {/* Footer */}
       <footer className="py-8 px-6 border-t border-slate-200 mt-auto bg-white font-['Inter']">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
              <div className="flex items-center gap-4 text-sm text-slate-500">
-               <span className="font-bold text-slate-900">Sub2Article AI</span>
-               <span className="w-px h-3 bg-slate-300"></span>
-               <a href="https://324893.xyz" target="_blank" className="flex items-center gap-2 hover:text-indigo-600 transition-colors">
-                  <Globe className="w-4 h-4" />
-                  <span className="hidden sm:inline">324893.xyz</span>
-               </a>
+               <span className="font-bold text-slate-900">Sub2Article AI</span><span className="w-px h-3 bg-slate-300"></span>
+               <a href="https://324893.xyz" target="_blank" className="flex items-center gap-2 hover:text-indigo-600 transition-colors"><Globe className="w-4 h-4" /> <span className="hidden sm:inline">324893.xyz</span></a>
              </div>
-
-             <div className="flex items-center gap-4">
-                <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold tracking-wide uppercase">
-                  <Zap className="w-3 h-3 fill-slate-700" /> Powered by Gemini
-                </div>
-             </div>
+             <div className="flex items-center gap-4"><div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold tracking-wide uppercase"><Zap className="w-3 h-3 fill-slate-700" /> Powered by Gemini</div></div>
           </div>
       </footer>
     </div>
