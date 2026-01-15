@@ -1,22 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Upload, 
-  Check, 
-  AlertCircle, 
-  Download,
-  Sparkles,
-  Zap,
-  Globe,
-  Brain,
-  FileText,
-  Trash2,
-  Copy,
-  Loader2,
-  ArrowRight,
-  Save,
-  Share2,
-  Plus,
-  Calendar
+  Upload, Check, AlertCircle, Download, Sparkles, Zap, Globe, Brain, FileText, Trash2, Copy, Loader2, ArrowRight, Save, Share2, Plus, Calendar
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
@@ -50,9 +34,17 @@ const App: React.FC = () => {
 
     const checkUrlForArticle = async () => {
       const params = new URLSearchParams(window.location.search);
-      const articleId = params.get('id');
+      let articleId = params.get('id');
 
       if (articleId) {
+        // === 修改点：支持短链接解析 ===
+        // 如果 URL 是 ?id=Title.html，则转换为 R2 路径 articles/Title.md
+        if (!articleId.startsWith('articles/')) {
+            // 将 .html 替换回 .md，并补全路径
+            const realKey = articleId.replace(/\.html$/, '.md');
+            articleId = `articles/${realKey}`;
+        }
+
         setStatus(AppStatus.LOADING);
         setProcessStatus("正在从云端加载文章...");
         try {
@@ -61,8 +53,9 @@ const App: React.FC = () => {
             setOutputText(content);
             setCurrentArticleKey(articleId);
 
+            // 解析文件名用于显示
             const rawName = articleId.split('/').pop() || '';
-            const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Shared Article';
+            const simpleName = rawName.replace('.md', '').replace(/_/g, ' ');
             setFileName(simpleName);
 
             setStatus(AppStatus.SUCCESS);
@@ -81,9 +74,15 @@ const App: React.FC = () => {
     checkUrlForArticle();
   }, []);
 
-  const updateUrlWithId = (id: string | null) => {
-    if (id) {
-      const newUrl = `${window.location.pathname}?id=${encodeURIComponent(id)}`;
+  // === 修改点：生成短链接 URL ===
+  const updateUrlWithId = (key: string | null) => {
+    if (key) {
+      // 从 articles/My_Title.md 提取 My_Title
+      const shortName = key.split('/').pop()?.replace('.md', '') || 'article';
+      // 生成伪静态链接 .html
+      const shortUrlParam = `${shortName}.html`;
+
+      const newUrl = `${window.location.pathname}?id=${encodeURIComponent(shortUrlParam)}`;
       window.history.pushState({ path: newUrl }, '', newUrl);
     } else {
       const newUrl = window.location.pathname;
@@ -205,14 +204,14 @@ const App: React.FC = () => {
       const h1Match = textToSave.match(/^#\s+(.+)$/m);
       const h1 = h1Match ? h1Match[1].trim().replace(/[*_~`]/g, '') : '';
 
-      // 2. 提取 H2 (中文标题) - 允许 # 和文字之间有灵活空格
+      // 2. 提取 H2 (中文标题)
       const h2Match = textToSave.match(/^##\s*(.+)$/m);
       const h2 = h2Match ? h2Match[1].trim().replace(/[*_~`]/g, '') : '';
 
       // 3. 组合标题
       let fullTitle = fileName || "Untitled";
       if (h1 && h2) {
-          fullTitle = `${h1} ${h2}`; // 用空格连接，R2Service 会转为下划线
+          fullTitle = `${h1} ${h2}`;
       } else if (h1) {
           fullTitle = h1;
       }
@@ -248,10 +247,10 @@ const App: React.FC = () => {
       const content = await getArticleContent(key);
       setOutputText(content);
       setCurrentArticleKey(key);
-      updateUrlWithId(key);
+      updateUrlWithId(key); // 更新 URL 为短链接
 
       const rawName = key.split('/').pop() || '';
-      const simpleName = rawName.replace('.md', '').split('_').slice(1).join(' ') || 'Article';
+      const simpleName = rawName.replace('.md', '').replace(/_/g, ' ') || 'Article';
       setFileName(simpleName);
 
       setStatus(AppStatus.SUCCESS);
@@ -329,7 +328,6 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-             {/* 仅在首页显示添加按钮 */}
              {viewMode === 'list' && status === AppStatus.IDLE && (
                 <button
                   onClick={goCreate}
@@ -378,8 +376,6 @@ const App: React.FC = () => {
           <>
             {viewMode === 'list' && (
                <div className="space-y-4 animate-in fade-in zoom-in-95 duration-500 mt-4">
-                  {/* === 修改点：移除顶部 Title 块 === */}
-
                   {isLoadingHistory ? (
                     <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
                   ) : historyList.length === 0 ? (
@@ -394,9 +390,9 @@ const App: React.FC = () => {
                     <div className="grid grid-cols-1 gap-4">
                       {historyList.map((item) => {
                         const rawName = item.Key.split('/').pop() || '';
-                        const fullName = rawName.replace('.md', '').split('_').slice(1).join(' ') || '无标题文章';
+                        // === 修改点：移除对 timestamp 下划线的依赖，因为新文件名不再包含时间戳 ===
+                        const fullName = rawName.replace('.md', '').replace(/_/g, ' ') || '无标题文章';
 
-                        // === 解析标题 ===
                         let mainTitle = fullName;
                         let subTitle = '';
                         const chineseMatch = fullName.match(/[\u4e00-\u9fa5]/);
@@ -413,7 +409,6 @@ const App: React.FC = () => {
                           <div
                             key={item.Key}
                             onClick={() => handleLoadArticle(item.Key)}
-                            // === 修改点：纯净卡片设计 ===
                             className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:border-slate-200 transition-all cursor-pointer relative flex flex-col justify-start"
                           >
                              <div className="flex-1 min-w-0 pr-8">
@@ -450,7 +445,6 @@ const App: React.FC = () => {
 
             {viewMode === 'create' && (
               <div className="animate-in fade-in zoom-in-95 duration-700 mt-4">
-                {/* === 修改点：移除所有顶部大字，仅保留上传卡片 === */}
                 <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 p-2 overflow-hidden transition-all hover:shadow-2xl hover:shadow-slate-200/80">
                   <div className="bg-slate-50 rounded-xl p-8 space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4">

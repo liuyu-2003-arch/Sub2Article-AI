@@ -17,22 +17,23 @@ const s3Client = new S3Client({
 });
 
 /**
- * 上传文章到 R2
+ * 上传文章到 R2 (生成简短文件名)
  */
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-  // 1. 过滤文件名
-  // 保留：字母、数字、中文、下划线、空格、连字符
+  // 1. 过滤文件名：保留字母、数字、中文，将空格转为下划线
   let safeTitle = title.replace(/[^\w\u4e00-\u9fa5\s-]/g, "");
-  safeTitle = safeTitle.replace(/\s+/g, "_"); // 空格变下划线
+  safeTitle = safeTitle.replace(/\s+/g, "_");
 
-  // === 关键修复：长度限制扩大到 250，确保中文副标题不被截断 ===
-  safeTitle = safeTitle.substring(0, 250);
-
+  // 确保不为空
   if (!safeTitle) safeTitle = "Untitled";
 
-  const fileName = `articles/${userId}/${timestamp}_${safeTitle}.md`;
+  // 限制长度
+  safeTitle = safeTitle.substring(0, 100);
+
+  // === 修改点：移除 Timestamp 和 UserID 层级，实现短链接 ===
+  // 新路径格式: articles/My_Title.md
+  // 注意：这会导致同名标题互相覆盖，但为了短链接这是必要的妥协
+  const fileName = `articles/${safeTitle}.md`;
 
   const command = new PutObjectCommand({
     Bucket: BUCKET_NAME,
@@ -55,7 +56,9 @@ export async function uploadToR2(content: string, title: string, userId: string)
  * 获取文章列表
  */
 export async function listArticles(userId: string) {
-  const prefix = `articles/${userId}/`;
+  // === 修改点：列出 articles/ 根目录下的所有文件 ===
+  const prefix = `articles/`;
+
   const command = new ListObjectsV2Command({
     Bucket: BUCKET_NAME,
     Prefix: prefix,
