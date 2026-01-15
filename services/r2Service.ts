@@ -17,23 +17,29 @@ const s3Client = new S3Client({
 });
 
 /**
- * 上传文章到 R2 (生成简短文件名)
+ * 上传文章到 R2
+ * 格式变更为: articles/English_Title_20260116120000.md
  */
 export async function uploadToR2(content: string, title: string, userId: string): Promise<string> {
-  // 1. 过滤文件名：保留字母、数字、中文，将空格转为下划线
-  let safeTitle = title.replace(/[^\w\u4e00-\u9fa5\s-]/g, "");
-  safeTitle = safeTitle.replace(/\s+/g, "_");
+  // 1. 生成紧凑时间戳 (YYYYMMDDHHmmss)
+  const now = new Date();
+  const timestamp = now.toISOString().replace(/[-:T.]/g, '').slice(0, 14);
 
-  // 确保不为空
-  if (!safeTitle) safeTitle = "Untitled";
+  // 2. 过滤标题：只保留英文、数字、空格，去除中文和特殊符号
+  // 目的：让 URL 变成纯英文
+  let safeTitle = title.replace(/[^\w\s-]/g, "");
+  safeTitle = safeTitle.replace(/\s+/g, "_"); // 空格转下划线
+  safeTitle = safeTitle.replace(/_+/g, "_"); // 去除重复下划线
+  safeTitle = safeTitle.replace(/^_|_$/g, ""); // 去除首尾下划线
+
+  // 如果全是中文导致过滤后为空，给个默认名
+  if (!safeTitle) safeTitle = "Untitled_Article";
 
   // 限制长度
   safeTitle = safeTitle.substring(0, 100);
 
-  // === 修改点：移除 Timestamp 和 UserID 层级，实现短链接 ===
-  // 新路径格式: articles/My_Title.md
-  // 注意：这会导致同名标题互相覆盖，但为了短链接这是必要的妥协
-  const fileName = `articles/${safeTitle}.md`;
+  // 3. 组合文件名：英文标题 + 下划线 + 紧凑时间戳
+  const fileName = `articles/${safeTitle}_${timestamp}.md`;
 
   const command = new PutObjectCommand({
     Bucket: BUCKET_NAME,
@@ -53,10 +59,9 @@ export async function uploadToR2(content: string, title: string, userId: string)
 }
 
 /**
- * 获取文章列表
+ * 获取文章列表 (保持不变，但范围改为 articles/)
  */
 export async function listArticles(userId: string) {
-  // === 修改点：列出 articles/ 根目录下的所有文件 ===
   const prefix = `articles/`;
 
   const command = new ListObjectsV2Command({

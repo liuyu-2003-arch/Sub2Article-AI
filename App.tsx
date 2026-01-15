@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
-  Upload, Check, AlertCircle, Download, Sparkles, Zap, Globe, Brain, FileText, Trash2, Copy, Loader2, ArrowRight, Save, Share2, Plus, Calendar
+  Upload, Check, AlertCircle, Sparkles, Zap, Globe, FileText, Trash2, Copy, Loader2, ArrowRight, Save, Share2, Plus, Calendar
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { processSubtitleToArticleStream, continueProcessingStream } from './services/geminiService';
@@ -28,7 +28,28 @@ const App: React.FC = () => {
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
-  // 初始化
+  // === 核心修改：解析文件名为纯净标题 ===
+  const parseCleanTitle = (filename: string) => {
+    let cleanName = filename.replace('.md', '');
+
+    // 1. 处理新格式：Title_Here_20260116001523 (时间戳在后)
+    // 匹配末尾的 14 位数字时间戳
+    const newFormatMatch = cleanName.match(/^(.*)_(\d{14})$/);
+    if (newFormatMatch) {
+      // 返回第一组（标题部分），并把下划线换回空格
+      return newFormatMatch[1].replace(/_/g, ' ');
+    }
+
+    // 2. 处理旧格式：2026-01-11T..._Title_Here (时间戳在前)
+    // 移除 ISO 时间戳前缀
+    cleanName = cleanName.replace(/^\d{4}-\d{2}-\d{2}T[\d-]+\w+_/, '');
+
+    // 移除旧版可能存在的 userId 目录名干扰
+    cleanName = cleanName.split('/').pop() || cleanName;
+
+    return cleanName.replace(/_/g, ' ');
+  };
+
   useEffect(() => {
     loadHistory();
 
@@ -37,10 +58,9 @@ const App: React.FC = () => {
       let articleId = params.get('id');
 
       if (articleId) {
-        // === 修改点：支持短链接解析 ===
-        // 如果 URL 是 ?id=Title.html，则转换为 R2 路径 articles/Title.md
+        // === 核心修改：URL 还原逻辑 ===
+        // 如果 ID 是 Life_is_Short_20260116.html，还原为 articles/Life_is_Short_20260116.md
         if (!articleId.startsWith('articles/')) {
-            // 将 .html 替换回 .md，并补全路径
             const realKey = articleId.replace(/\.html$/, '.md');
             articleId = `articles/${realKey}`;
         }
@@ -53,10 +73,9 @@ const App: React.FC = () => {
             setOutputText(content);
             setCurrentArticleKey(articleId);
 
-            // 解析文件名用于显示
+            // 使用解析函数获取干净的标题
             const rawName = articleId.split('/').pop() || '';
-            const simpleName = rawName.replace('.md', '').replace(/_/g, ' ');
-            setFileName(simpleName);
+            setFileName(parseCleanTitle(rawName));
 
             setStatus(AppStatus.SUCCESS);
             setProcessStatus("加载完成");
@@ -74,12 +93,13 @@ const App: React.FC = () => {
     checkUrlForArticle();
   }, []);
 
-  // === 修改点：生成短链接 URL ===
+  // === 核心修改：生成 .html 结尾的短链接 ===
   const updateUrlWithId = (key: string | null) => {
     if (key) {
-      // 从 articles/My_Title.md 提取 My_Title
+      // key 是 articles/Title_Timestamp.md
+      // 提取文件名部分
       const shortName = key.split('/').pop()?.replace('.md', '') || 'article';
-      // 生成伪静态链接 .html
+      // 构造成 .html 伪静态地址
       const shortUrlParam = `${shortName}.html`;
 
       const newUrl = `${window.location.pathname}?id=${encodeURIComponent(shortUrlParam)}`;
@@ -90,6 +110,7 @@ const App: React.FC = () => {
     }
   };
 
+  // ... (进度条 useEffect 保持不变) ...
   useEffect(() => {
     let interval: number;
     if (status === AppStatus.LOADING) {
@@ -146,6 +167,7 @@ const App: React.FC = () => {
   const handleProcess = async () => {
     if (!inputText.trim()) return;
 
+    // 初始显示
     const initialText = fileName ? `# ${fileName}\n` : '';
     setOutputText(initialText);
     setStatus(AppStatus.LOADING);
@@ -200,27 +222,20 @@ const App: React.FC = () => {
   const performAutoSave = async (textToSave: string) => {
     setIsSaving(true);
     try {
-      // 1. 提取 H1 (英文标题)
+      // 提取标题逻辑
       const h1Match = textToSave.match(/^#\s+(.+)$/m);
       const h1 = h1Match ? h1Match[1].trim().replace(/[*_~`]/g, '') : '';
 
-      // 2. 提取 H2 (中文标题)
-      const h2Match = textToSave.match(/^##\s*(.+)$/m);
-      const h2 = h2Match ? h2Match[1].trim().replace(/[*_~`]/g, '') : '';
-
-      // 3. 组合标题
-      let fullTitle = fileName || "Untitled";
-      if (h1 && h2) {
-          fullTitle = `${h1} ${h2}`;
-      } else if (h1) {
-          fullTitle = h1;
-      }
+      // 注意：现在文件名主要依赖 H1 (英文标题)，以便生成干净的 URL
+      // 中文标题 (H2) 虽然提取，但主要用于正文显示，不强制放入文件名，以免 URL 变长变乱
+      const fullTitle = h1 || fileName || "Untitled";
 
       const userId = localStorage.getItem('sub2article_user_id') || 'default_user';
       if (!localStorage.getItem('sub2article_user_id')) {
           localStorage.setItem('sub2article_user_id', userId);
       }
 
+      // 上传 (R2Service 会自动处理成 English_Title_Timestamp 格式)
       const savedKey = await uploadToR2(textToSave, fullTitle, userId);
 
       setCurrentArticleKey(savedKey);
@@ -247,11 +262,10 @@ const App: React.FC = () => {
       const content = await getArticleContent(key);
       setOutputText(content);
       setCurrentArticleKey(key);
-      updateUrlWithId(key); // 更新 URL 为短链接
+      updateUrlWithId(key);
 
       const rawName = key.split('/').pop() || '';
-      const simpleName = rawName.replace('.md', '').replace(/_/g, ' ') || 'Article';
-      setFileName(simpleName);
+      setFileName(parseCleanTitle(rawName));
 
       setStatus(AppStatus.SUCCESS);
       setProcessStatus("加载完成");
@@ -390,18 +404,9 @@ const App: React.FC = () => {
                     <div className="grid grid-cols-1 gap-4">
                       {historyList.map((item) => {
                         const rawName = item.Key.split('/').pop() || '';
-                        // === 修改点：移除对 timestamp 下划线的依赖，因为新文件名不再包含时间戳 ===
-                        const fullName = rawName.replace('.md', '').replace(/_/g, ' ') || '无标题文章';
 
-                        let mainTitle = fullName;
-                        let subTitle = '';
-                        const chineseMatch = fullName.match(/[\u4e00-\u9fa5]/);
-                        if (chineseMatch && chineseMatch.index > 0) {
-                            mainTitle = fullName.substring(0, chineseMatch.index).trim();
-                            subTitle = fullName.substring(chineseMatch.index).trim();
-                        } else if (/[\u4e00-\u9fa5]/.test(fullName) && !/[a-zA-Z]/.test(fullName)) {
-                            mainTitle = fullName;
-                        }
+                        // === 核心修改：使用统一的标题解析函数 ===
+                        const displayName = parseCleanTitle(rawName);
 
                         const date = new Date(item.LastModified).toLocaleDateString();
 
@@ -412,15 +417,9 @@ const App: React.FC = () => {
                             className="group bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:border-slate-200 transition-all cursor-pointer relative flex flex-col justify-start"
                           >
                              <div className="flex-1 min-w-0 pr-8">
-                               <h3 className="text-xl font-bold text-slate-900 mb-1 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors">
-                                 {mainTitle}
+                               <h3 className="text-xl font-bold text-slate-900 mb-1 font-['Playfair_Display'] leading-tight group-hover:text-indigo-600 transition-colors line-clamp-2">
+                                 {displayName}
                                </h3>
-
-                               {subTitle && (
-                                 <p className="text-base text-slate-500 font-['Noto_Sans_SC'] mt-1">
-                                   {subTitle}
-                                 </p>
-                               )}
 
                                <div className="flex items-center gap-2 text-xs text-slate-400 font-['Inter'] mt-3">
                                  <Calendar className="w-3.5 h-3.5" />
